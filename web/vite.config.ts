@@ -23,7 +23,12 @@ export default defineConfig({
     outDir: 'dist',
     assetsInlineLimit: 0,
     rollupOptions: {
-      input: { main: 'index.html', sw: 'src/sw.ts' },
+      // Two pages: the landing page at the root and the app under /demo. The
+      // app was at the root until the landing page arrived, and it moved rather
+      // than the landing page taking a path of its own -- a share link, a search
+      // result and an App Store listing all point at walky.ch, and the thing
+      // that should answer there is the page that says what Walky is.
+      input: { landing: 'index.html', app: 'demo/index.html', sw: 'src/sw.ts' },
       output: {
         // The service worker has to keep a stable, root-level name: its URL is
         // its identity to the browser, and a hashed one would register a second

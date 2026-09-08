@@ -1,0 +1,769 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Walky's landing page.
+
+   The token system, the type scale, the spacing and the controls are ported
+   from pandermatt.ch (`src/styles/global.css` in pandermatt/pandermatt-web) so
+   that walky.ch reads as a sibling of the site it is linked from rather than as
+   a page that happens to share an author. Kept close enough to the original
+   that a change there is a change worth bringing across.
+
+   Colours are stored as bare RGB triplets and always consumed as
+   `rgba(var(--c-x), α)`, which is what makes one-off translucency possible
+   without a second token per opacity level.
+
+   ONE THING IS DELIBERATELY NOT PORTED: the accent. See §1.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   1. TOKENS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Accent — Walky's, not the site's indigo.
+     The site derives nothing here, and neither does this page: the accent is
+     ORANGE #FFC800, the colour the path to a goal is drawn in, straight from
+     the 2016 palette (see src/palette.ts and the README's "The look").
+
+     It splits the way the site's own --c-amber / --c-amber-ink pair splits, and
+     for the same reason. As a FILL the orange is the orange. As TEXT it is
+     unreadable -- 1.4:1 on white -- so --c-accent-ink is that same colour under
+     shadowOf(), which is Java's Color.darker() applied twice: the operation
+     that already derives the #1E1E1E ground and the shadow every wall casts. It
+     comes out rgb(124,98,0) and measures 5.8:1 on white.
+
+     The accent is therefore one colour and its own shadow, not two colours that
+     happen to sit near each other -- the claim ui/theme.ts makes about the app,
+     held to on the page that advertises it.
+
+     --c-on-accent is the text that sits ON the fill, and it is #1E1E1E rather
+     than white: white on #FFC800 measures 1.6:1 and the ink measures 10.7:1.
+     Never hardcode #fff on the accent. */
+  --c-accent: 255, 200, 0; /* ORANGE #FFC800 */
+  --c-accent-hover: 255, 214, 61; /* #FFD63D */
+  --c-accent-ink: 124, 98, 0; /* shadowOf(ORANGE) #7C6200 — 5.8:1 on white */
+  --c-on-accent: 30, 30, 30; /* 10.7:1 on the fill */
+
+  /* The edge a bright fill needs on white. WCAG asks 3:1 of a control whose
+     meaning IS its colour, and #FFC800 on white is 1.4:1 -- an outline is what
+     makes a bright fill legible without dimming it. Same argument, same value
+     as --wk-fill-edge in ui/theme.ts. */
+  --c-fill-edge: 0, 0, 0, 0.22;
+
+  --c-text-1: 29, 29, 31;
+  --c-text-2: 110, 110, 115;
+  --c-text-3: 134, 134, 139;
+
+  --c-bg: 255, 255, 255;
+  --c-bg-soft: 245, 245, 247;
+
+  --c-divider: 210, 210, 215;
+
+  /* The dark band is black in both themes, the way the site's Recognition band
+     is: the one surface an accent has to survive without the ground moving to
+     meet it. */
+  --c-band: 0, 0, 0;
+  --c-band-text: 245, 245, 247;
+
+  /* ── Type ──────────────────────────────────────────────────────────────
+     'Google Sans Flex', declared in §2 against the file this repo already
+     self-hosts for the app. NOT the site's 'Google Sans Flex Variable', which
+     is Fontsource's family name for a build that is not in public/fonts here.
+     Emoji fonts are appended for the flag in the hero's closing line. */
+  --font-base:
+    'Google Sans Flex', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* Type scale — size, weight, tracking and leading move together. Tracking is
+     size-specific by design: display text needs negative tracking to stop
+     reading as gappy, small text a touch of positive to stay legible. */
+  --fs-display: clamp(3.4rem, 6.2vw, 5.4rem);
+  --ls-display: -0.03em;
+  --lh-display: 1;
+  --wght-display: 900;
+
+  --fs-h1: clamp(2.2rem, 4vw, 3.5rem);
+  --ls-h1: -0.025em;
+  --lh-h1: 1.06;
+  --wght-h1: 700;
+
+  --fs-h2: 1.75rem;
+  --ls-h2: -0.018em;
+  --lh-h2: 1.15;
+  --wght-h2: 700;
+
+  --fs-h3: 1.125rem;
+  --ls-h3: -0.01em;
+  --lh-h3: 1.35;
+  --wght-h3: 600;
+
+  --fs-lead: 1.25rem;
+  --ls-lead: 0;
+  --lh-lead: 1.6;
+
+  --fs-body: 1rem;
+  --lh-body: 1.6;
+
+  --fs-sm: 0.875rem;
+  --ls-sm: 0.005em;
+  --lh-sm: 1.5;
+
+  --fs-xs: 0.75rem;
+  --ls-xs: 0.01em;
+  --lh-xs: 1.45;
+
+  --fs-label: 0.74rem;
+  --ls-label: 0.12em;
+  --wght-label: 600;
+
+  /* ── Space ─────────────────────────────────────────────────────────── */
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-s: 1rem;
+  --space-m: 1.5rem;
+  --space-l: 2.5rem;
+  --space-xl: 4rem;
+  --space-2xl: 6rem;
+
+  --measure: 68ch;
+  --transition: 200ms ease-in-out;
+  --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --radius-pill: 100px;
+  --radius-card: 18px;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.1);
+  --shadow-photo: 0 24px 64px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.04);
+
+  /* ── Page margin ───────────────────────────────────────────────────────
+     The site's mechanism and the site's measure. Above 1160px the margin
+     becomes whatever keeps the content column at exactly 984px. The win over a
+     max-width wrapper: tinted and black bands go full-bleed with no nested
+     wrapper. */
+  --page-margin: 48px;
+
+  color-scheme: light;
+}
+
+@media (min-width: 1160px) {
+  :root { --page-margin: calc(50% - 492px); }
+}
+@media (max-width: 1150px) {
+  :root { --page-margin: 40px; }
+}
+@media (max-width: 900px) {
+  :root { --page-margin: 20px; }
+}
+
+/* Dark palette. Defined ONLY here and on :root — never also under
+   @media (prefers-color-scheme: dark). The inline script in index.html has
+   already resolved the system preference into this class, and two sources would
+   disagree the moment somebody uses the toggle. */
+:root.dark {
+  /* The fill does not move: it is the app's colour, and the app's colour does
+     not have a light and a dark version. Only the ink adapts -- on #1E1E1E the
+     orange is already the legible choice, at 10.7:1, so the ink IS the fill. */
+  --c-accent-ink: 255, 200, 0;
+  --c-accent-hover: 255, 214, 61;
+
+  /* A bright fill on a dark ground clears 3:1 on its own; the edge that carries
+     it on white would only muddy it. */
+  --c-fill-edge: 255, 255, 255, 0;
+
+  --c-text-1: 255, 255, 255;
+  --c-text-2: 152, 152, 157;
+  --c-text-3: 122, 122, 127;
+
+  /* #1E1E1E, not the site's #161617. It is Walky's ground, derived rather than
+     picked -- Color.DARK_GRAY.darker().darker() -- and using it here means
+     stepping from the landing page into the demo is one continuous surface
+     rather than two dark greys that nearly match. */
+  --c-bg: 30, 30, 30;
+  --c-bg-soft: 38, 38, 38;
+
+  --c-divider: 62, 62, 62;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-photo: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+
+  color-scheme: dark;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2. FONT
+   The @font-face is NOT here. It is in the <head> of index.html, for the same
+   reason ui/theme.ts declares the app's at runtime rather than in a stylesheet:
+   the URL has to be relative to the *document*.
+
+   Vite emits this file into assets/ with a content hash, so a relative url()
+   here would resolve against assets/ in the build and against the document in
+   dev -- two different files, one of which is always a 404. A root-absolute
+   path would agree with both and then break the day the app is served from a
+   subpath, which is the whole reason `base` is './'.
+
+   The file itself is the app's own, self-hosted in public/fonts and already in
+   the service worker's precache list, so the landing page costs no new bytes
+   over the demo and "offline in the strong sense" stays true for both pages.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   3. RESET
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+* { margin: 0; }
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  /* Clears the sticky header on anchor jumps. */
+  scroll-padding-top: 5.5rem;
+}
+
+body {
+  background: rgba(var(--c-bg), 1);
+  color: rgba(var(--c-text-1), 1);
+  font-family: var(--font-base);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+img, svg, canvas { display: block; max-width: 100%; }
+img, svg { height: auto; }
+
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+a { color: inherit; text-decoration: none; }
+
+ul, ol { list-style: none; padding: 0; }
+
+code { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4. TYPOGRAPHY
+   Each step applies size + weight + tracking + leading as a set. Weight is
+   written twice — `font-weight` for the cascade and the fallback face, and
+   `font-variation-settings` so the variable axis is explicit.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.t-display {
+  font-size: var(--fs-display);
+  font-weight: var(--wght-display);
+  font-variation-settings: 'wght' 900;
+  letter-spacing: var(--ls-display);
+  line-height: var(--lh-display);
+  color: rgba(var(--c-text-1), 1);
+}
+
+h1, .t-h1 {
+  font-size: var(--fs-h1);
+  font-weight: var(--wght-h1);
+  font-variation-settings: 'wght' 700;
+  letter-spacing: var(--ls-h1);
+  line-height: var(--lh-h1);
+  color: rgba(var(--c-text-1), 1);
+}
+
+h2, .t-h2 {
+  font-size: var(--fs-h2);
+  font-weight: var(--wght-h2);
+  font-variation-settings: 'wght' 700;
+  letter-spacing: var(--ls-h2);
+  line-height: var(--lh-h2);
+  color: rgba(var(--c-text-1), 1);
+}
+
+h3, .t-h3 {
+  font-size: var(--fs-h3);
+  font-weight: var(--wght-h3);
+  font-variation-settings: 'wght' 600;
+  letter-spacing: var(--ls-h3);
+  line-height: var(--lh-h3);
+  color: rgba(var(--c-text-1), 1);
+}
+
+.lead {
+  font-size: var(--fs-lead);
+  line-height: var(--lh-lead);
+  letter-spacing: var(--ls-lead);
+  color: rgba(var(--c-text-2), 1);
+}
+
+/* Small uppercase section eyebrow. */
+.label {
+  display: block;
+  font-size: var(--fs-label);
+  font-weight: var(--wght-label);
+  font-variation-settings: 'wght' 600;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: rgba(var(--c-text-2), 1);
+  margin-bottom: 14px;
+}
+
+p { text-wrap: pretty; }
+
+strong { font-weight: 600; font-variation-settings: 'wght' 600; color: rgba(var(--c-text-1), 1); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   5. LAYOUT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.l-site { padding-inline: var(--page-margin); }
+
+.section { padding-block: var(--space-2xl); }
+.section--tint { background: rgba(var(--c-bg-soft), 1); }
+.section--dark { background: rgba(var(--c-band), 1); color: rgba(var(--c-band-text), 1); }
+.section--dark h2 { color: rgba(var(--c-band-text), 1); }
+
+@media (max-width: 900px) {
+  .section { padding-block: var(--space-xl); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   6. BUTTONS & LINKS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  padding: 12px 24px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: 0.95rem;
+  font-weight: 500;
+  font-variation-settings: 'wght' 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition),
+    color var(--transition),
+    border-color var(--transition),
+    transform 100ms ease-out;
+}
+
+/* Feedback on press, not on release — a button that only reacts to `click`
+   reads as dead under the finger. */
+.button:active { transform: scale(0.97); }
+
+.button--primary {
+  background: rgba(var(--c-accent), 1);
+  color: rgba(var(--c-on-accent), 1);
+  /* The hairline, not a shadow: see --c-fill-edge. */
+  border-color: rgba(var(--c-fill-edge));
+}
+.button--primary:hover {
+  background: rgba(var(--c-accent-hover), 1);
+  color: rgba(var(--c-on-accent), 1);
+}
+
+.button--outline {
+  background: transparent;
+  border-color: rgba(var(--c-divider), 1);
+  color: rgba(var(--c-text-1), 1);
+}
+.button--outline:hover {
+  border-color: rgba(var(--c-accent-ink), 1);
+  color: rgba(var(--c-accent-ink), 1);
+}
+
+.button-row { display: flex; flex-wrap: wrap; gap: var(--space-s); align-items: center; }
+
+.link-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  font-variation-settings: 'wght' 500;
+  color: rgba(var(--c-accent-ink), 1);
+}
+.link-arrow:hover { text-decoration: underline; }
+.link-arrow .chev { font-size: 1.1em; line-height: 1; transition: transform 0.25s ease; }
+.link-arrow:hover .chev { transform: translateX(2px); }
+
+/* On the black band the light-theme ink (#7C6200) measures 3.6:1, which is a
+   border and not a link. The band is black in BOTH themes, so it cannot wait
+   for the theme to move to meet it -- it takes the fill, at 13.5:1. */
+.section--dark .link-arrow { color: rgba(var(--c-accent), 1); }
+
+/* An inline link inside running text: underlined, so it is not colour alone. */
+.text-link {
+  color: rgba(var(--c-accent-ink), 1);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(var(--c-accent-ink), 0.4);
+  transition: text-decoration-color var(--transition);
+}
+.text-link:hover { text-decoration-color: rgba(var(--c-accent-ink), 1); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   7. ACCESSIBILITY
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.skip-link {
+  position: absolute;
+  top: var(--space-s);
+  left: var(--space-s);
+  z-index: 200;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--c-accent), 1);
+  color: rgba(var(--c-on-accent), 1);
+  /* Off-screen until focused, but still in the tab order. */
+  transform: translateY(calc(-100% - var(--space-xl)));
+  transition: transform var(--transition);
+}
+.skip-link:focus-visible { transform: translateY(0); }
+
+:focus-visible {
+  outline: 2px solid rgba(var(--c-accent-ink), 1);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   8. MOTION
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.reveal {
+  transition:
+    opacity 0.6s var(--ease-out-quint),
+    transform 0.6s var(--ease-out-quint);
+}
+
+/* The hidden state is gated on [data-js], which the inline head script sets.
+   Without the gate, a scripting failure would leave every revealed section
+   permanently invisible. */
+html[data-js] .reveal {
+  opacity: 0;
+  transform: translateY(28px);
+}
+html[data-js] .reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html[data-js] .reveal { opacity: 1; transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   9. HEADER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-s);
+  min-height: 60px;
+  padding-block: var(--space-xs);
+  background: rgba(var(--c-bg), 0.82);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(var(--c-divider), 0.5);
+}
+
+/* Where the filter is unsupported the bar goes fully opaque instead: a custom
+   property cannot carry a fallback, and a translucent bar with no blur behind
+   it is text over a moving crowd. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .site-header { background: rgba(var(--c-bg), 1); }
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variation-settings: 'wght' 700;
+  letter-spacing: -0.02em;
+}
+
+/* The mark is the app's own: a pedestrian is a filled dot in its goal's colour
+   inside a white ring, which is what PedestrianPanel.drawPedestrian has drawn
+   since 2016. Three of them, the way the sticker drawer icon is three. */
+.wordmark-dots { display: flex; gap: 3px; }
+.wordmark-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.92);
+}
+
+.nav { display: flex; align-items: center; gap: var(--space-xs); }
+
+.nav-link {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  font-variation-settings: 'wght' 500;
+  color: rgba(var(--c-text-2), 1);
+  padding: 6px 8px;
+  border-radius: var(--radius-pill);
+  transition: color var(--transition);
+}
+.nav-link:hover { color: rgba(var(--c-text-1), 1); }
+
+@media (max-width: 560px) {
+  .nav-link--wide { display: none; }
+}
+
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: rgba(var(--c-text-2), 1);
+  transition: background-color var(--transition), color var(--transition);
+}
+.theme-toggle:hover {
+  background: rgba(var(--c-text-1), 0.06);
+  color: rgba(var(--c-text-1), 1);
+}
+/* One button, two glyphs: the moon while the page is light, the sun while it is
+   dark -- the icon for the theme the press would give you, which is the same
+   thing the button's aria-label says. Showing the theme already in force would
+   leave the picture and the label contradicting each other. */
+.theme-toggle .icon-sun { display: none; }
+:root.dark .theme-toggle .icon-sun { display: block; }
+:root.dark .theme-toggle .icon-moon { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   10. HERO
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.s-hero { position: relative; overflow: hidden; background: rgba(var(--c-bg), 1); }
+
+/* The site's asymmetric rhythm, preserved: the hero opens wide and closes tight
+   so it reads as continuous with the section below. */
+.hero-inner {
+  padding-block: 110px 80px;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 520px);
+  align-items: center;
+  gap: 64px;
+}
+
+.hero-left { display: flex; flex-direction: column; gap: 22px; }
+
+.hero-name { margin-bottom: -6px; }
+
+.hero-lead { max-width: 34ch; }
+
+.hero-bio {
+  max-width: 46ch;
+  color: rgba(var(--c-text-2), 1);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+
+.hero-cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-s); }
+
+.hero-made {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-xs);
+  color: rgba(var(--c-text-3), 1);
+}
+
+/* ── The App Store button ──────────────────────────────────────────────────
+   Large, and first: the native app is what this page is for. It is a <span>
+   rather than an <a> because there is no listing yet, and a link that goes
+   nowhere is worse than a control that says it is not ready. Turning it live is
+   a swap to <a href> and dropping .is-pending — see APP_STORE_URL in main.ts. */
+.button--store {
+  padding: 15px 26px;
+  font-size: 1.02rem;
+  font-weight: 600;
+  font-variation-settings: 'wght' 600;
+  gap: 0.6em;
+}
+.button--store .apple-glyph { width: 19px; height: 19px; fill: currentColor; }
+
+.button.is-pending {
+  cursor: default;
+  /* Muted rather than the flat opacity a disabled control usually takes: at
+     .4 the orange stops reading as the accent at all, and this is still the
+     thing the page is pointing at. */
+  background: rgba(var(--c-accent), 0.5);
+  border-color: transparent;
+  color: rgba(var(--c-on-accent), 0.75);
+}
+.button.is-pending:hover { background: rgba(var(--c-accent), 0.5); }
+.button.is-pending:active { transform: none; }
+
+:root.dark .button.is-pending {
+  background: rgba(var(--c-accent), 0.28);
+  color: rgba(var(--c-accent), 1);
+}
+
+.store-pill {
+  margin-left: 2px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--c-on-accent), 0.14);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variation-settings: 'wght' 600;
+  letter-spacing: var(--ls-xs);
+  text-transform: uppercase;
+}
+:root.dark .store-pill { background: rgba(var(--c-accent), 0.18); }
+
+/* The web version, deliberately the smaller of the two. */
+.button--web {
+  padding: 10px 18px;
+  font-size: var(--fs-sm);
+}
+
+/* ── The live simulation ─────────────────────────────────────────────────── */
+.hero-stage {
+  position: relative;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  /* The app's own ground, so the frame is a window onto the demo rather than a
+     picture of it. Written out rather than taken from --c-bg: it is the
+     simulation's background, and it does not follow the page's theme any more
+     than the walls do. */
+  background: #1e1e1e;
+  box-shadow: var(--shadow-photo);
+  aspect-ratio: 4 / 3;
+}
+
+/* In dark the card and the page are the same #1E1E1E by design, which is one
+   continuous surface and also no edge at all. The hairline is what keeps it a
+   frame; in light the shadow already does that job. */
+:root.dark .hero-stage { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); }
+
+.hero-canvas { width: 100%; height: 100%; }
+
+.hero-figure { display: flex; flex-direction: column; gap: var(--space-2xs); }
+
+.hero-caption {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-xs);
+  color: rgba(var(--c-text-3), 1);
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .hero-inner {
+    padding-block: 56px 56px;
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  /* Stacked, the simulation goes first: it says what Walky is faster than the
+     paragraph does, and on a phone the paragraph is below the fold anyway. */
+  .hero-right { order: -1; }
+  .hero-stage { aspect-ratio: 16 / 11; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   11. FEATURES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: var(--space-m);
+  margin-top: var(--space-l);
+}
+
+.feature {
+  padding: var(--space-m);
+  border-radius: var(--radius-card);
+  background: rgba(var(--c-bg), 1);
+  border: 1px solid rgba(var(--c-divider), 0.55);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.feature h3 { margin-bottom: var(--space-3xs); }
+.feature p { color: rgba(var(--c-text-2), 1); font-size: var(--fs-sm); line-height: var(--lh-body); }
+
+/* Width as well as height, and align-self so the flex column does not stretch
+   it: an <svg> given only a height fills the row and then centres its viewBox
+   inside it under the default preserveAspectRatio, which puts the mark in the
+   middle of a card whose every other line is flush left. */
+.feature-mark {
+  width: 40px;
+  height: 22px;
+  align-self: flex-start;
+  margin-bottom: var(--space-2xs);
+}
+
+.section-head { max-width: var(--measure); }
+.section-head .lead { margin-top: var(--space-xs); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   12. THE BAND
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.band-inner { max-width: var(--measure); }
+.band-inner p { color: rgba(var(--c-band-text), 0.72); margin-top: var(--space-s); }
+.band-inner .label { color: rgba(var(--c-band-text), 0.6); }
+.band-inner code { color: rgba(var(--c-band-text), 0.92); }
+.band-inner .link-arrow { margin-top: var(--space-m); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   13. FOOTER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.site-footer {
+  padding-block: var(--space-l);
+  border-top: 1px solid rgba(var(--c-divider), 1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s) var(--space-m);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+  color: rgba(var(--c-text-2), 1);
+}
+
+.footer-links { display: flex; flex-wrap: wrap; gap: var(--space-s); }
+.footer-links a { transition: color var(--transition); }
+.footer-links a:hover { color: rgba(var(--c-accent-ink), 1); }

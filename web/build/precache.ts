@@ -38,3 +38,41 @@ export function buildPrecacheList(
   }
   return [...out].sort();
 }
+
+/** The landing page's shell, and the app's. */
+export const LANDING_SHELL = 'index.html';
+export const APP_SHELL = 'demo/index.html';
+
+/**
+ * Which shell answers a navigation.
+ *
+ * The worker used to serve one page on the premise that there was one page.
+ * There are two now: a landing page at the root and the app under /demo, built
+ * as separate Rollup inputs and precached as separate files. Getting this wrong
+ * offline is not subtle -- it is the app opening to a marketing page, or a
+ * shared map opening to a black canvas with nothing on it.
+ *
+ * `path` is deployment-relative. The match is on a whole path segment rather
+ * than a prefix: `demonstration` starts with the same four letters and is not
+ * the app.
+ */
+export function shellFor(path: string): string {
+  const first = stripLeadingSlash(path).split('/')[0];
+  return first === 'demo' ? APP_SHELL : LANDING_SHELL;
+}
+
+/**
+ * The same answer for a whole request URL, given where the app is deployed.
+ *
+ * The reduction is the half that is easy to get wrong and impossible to see
+ * going wrong: Walky can be served from a subpath -- `base` is './' so that it
+ * can -- and under `/somewhere/` the app's own page is `/somewhere/demo/`,
+ * which has to come back as `demo/` before the rule above reads it. Here rather
+ * than in the worker so that it is covered by the suite instead of by a deploy.
+ *
+ * @param url  the navigation's URL.
+ * @param base the deployment root, as the worker derives it from its own URL.
+ */
+export function shellForUrl(url: string | URL, base: URL): string {
+  return shellFor(new URL(url).pathname.slice(base.pathname.length));
+}

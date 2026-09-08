@@ -15,6 +15,45 @@ on. The one place it knowingly departs is how a pedestrian picks its next step,
 which the original wired to the preferred-space setting in a way that made the
 setting counterproductive — see [Crowd behaviour](#crowd-behaviour).
 
+## Two pages
+
+| | |
+|---|---|
+| `/` | The landing page. `index.html` and `src/landing/`. |
+| `/demo/` | The app. `demo/index.html` and everything else in `src/`. |
+
+The app was the root page until the landing page arrived, and it moved rather
+than the landing page taking a path of its own: a search result, a share link
+and an App Store listing all point at walky.ch, and what should answer there is
+the page that says what Walky is.
+
+Three things follow from the move, and each is a place the app used to be able
+to assume it was the only page:
+
+- **Assets are resolved against the deployment root, not the document.**
+  `src/assetUrl.ts` is the one place that knows the app's page sits a directory
+  below the root; the toolbar icons, the typeface and the service worker
+  registration all go through it. Written from the root instead — `/icons/…` —
+  they would agree with walky.ch and break under a subpath, which is the whole
+  reason `base` is `'./'`.
+- **The worker serves two shells.** `shellFor` in `build/precache.ts` decides
+  which, and `shellForUrl` does the reduction that makes it right under a
+  subpath. Both are unit-tested, because getting it wrong offline means the app
+  opening to a brochure — or a shared map opening to an empty canvas.
+- **Links made before the move still work.** Every Walky link pasted anywhere
+  before today is `walky.ch/#m=…` and now arrives at a page that reads no
+  fragment. `src/landing/forward.ts` forwards those into the app with the
+  payload intact. Links made since need nothing: `shareUrl` builds from
+  `location.href`.
+
+The landing page's own look is ported from [pandermatt.ch]'s `global.css` — the
+token system, the type scale, the spacing, the controls — with one substitution:
+the accent is Walky's `#FFC800` and its `shadowOf` shade rather than that site's
+indigo, for the reason the section below gives. Its hero is not a screenshot but
+the real model, stepped in the page; see `src/landing/heroScene.ts`.
+
+[pandermatt.ch]: https://pandermatt.ch/
+
 ## The look, and where it comes from
 
 | Element | Rule | Original |
@@ -735,6 +774,15 @@ copied from `public/`, drops the worker itself, and substitutes both the list an
 a hash of its contents into `src/sw.ts`. That hash names the cache, so a new
 build lands in a new cache and the previous one is deleted on activation.
 
+There are two pages under one worker, and one worker is the point: it is
+registered from the root — `src/assetUrl.ts` again — so its scope is the whole
+origin rather than `/demo/`, and a navigation to either page is answered from
+the same snapshot. Which shell answers is `shellFor`'s decision, and the
+manifest's `start_url` is `./demo/` so that installing gives the app and not the
+page describing it. Its `id` deliberately stays `./`: `id` is the installed
+app's identity, and moving it would orphan every home screen Walky is already
+on.
+
 Updating is offered, never imposed. The map you have drawn lives in memory and
 nowhere else, so a worker that reloaded the page to apply an update would throw
 away the crowd you were watching. The new worker takes over for the *next* load
@@ -748,7 +796,7 @@ edited.
 Two things the manifest does not cover:
 
 - **iOS reads almost none of it.** The home-screen icon, the app name and
-  standalone display each need their own tag in `index.html`.
+  standalone display each need their own tag in `demo/index.html`.
 - **The status bar is not somewhere to draw.** `viewport-fit=cover`, and
   equally the translucent status-bar style, put the page *underneath* iOS's
   status bar — which then frosts whatever sits below it, and the top of the map
@@ -1087,7 +1135,10 @@ npm run preview
 ```
 
 The service worker only exists in a build, so `npm run preview` is where to check
-the offline behaviour: load the page once, then kill the network and reload.
+the offline behaviour: load the page once, then kill the network and reload. Do
+it for both `/` and `/demo/` — they are separate shells, and only the app
+registers the worker, so the landing page goes offline the first time somebody
+opens the demo.
 
 ```bash
 npm test

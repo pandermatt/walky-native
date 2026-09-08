@@ -2,6 +2,7 @@ import type { ToolId } from '../tools/types';
 import { FINE, HANDHELD, TOUCH } from './appShell';
 import { injectStyle, installTheme } from './theme';
 import { attachTooltip } from './tooltip';
+import { asset } from '../assetUrl';
 
 export type ActionId =
   | 'start' | 'undo' | 'clear' | 'record' | 'reset_pedestrians' | 'reset_zoom' | 'settings';
@@ -402,7 +403,7 @@ export class Toolbar {
           btn.setAttribute('aria-pressed', 'false');
         }
         const img = document.createElement('img');
-        img.src = `./icons/${spec.icon}`;
+        img.src = asset(`icons/${spec.icon}`);
         img.alt = '';
         btn.appendChild(img);
         btn.addEventListener('click', () => {
@@ -522,6 +523,6 @@ export class Toolbar {
   setRunning(running: boolean): void {
     const btn = this.buttons.get('start');
     const img = btn?.querySelector('img');
-    if (img) img.src = `./icons/${running ? 'pause' : 'start'}.png`;
+    if (img) img.src = asset(`icons/${running ? 'pause' : 'start'}.png`);
   }
 }

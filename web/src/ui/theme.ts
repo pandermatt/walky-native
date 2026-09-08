@@ -1,3 +1,4 @@
+import { asset } from '../assetUrl';
 import { ORANGE, shadowOf, toCss, withAlpha } from '../palette';
 import { TOUCH } from './appShell';
 
@@ -33,7 +34,7 @@ const ACCENT = toCss(ORANGE);
 const ACCENT_TEXT = toCss(shadowOf(ORANGE));
 const ACCENT_TINT = withAlpha(ORANGE, 0.28);
 
-export /*
+/*
  * Walky's typeface.
  *
  * Google Sans Flex, self-hosted. Every other surface in the app already commits
@@ -53,26 +54,33 @@ export /*
  * Served from public/, so the precache list picks it up with the icons and the
  * offline guarantee stays true -- a font fetched from fonts.googleapis.com would
  * have quietly made "offline in the strong sense" a lie, and failed silently
- * rather than loudly, since there is no CSP to stop it. The URL is relative to
- * the document for the same reason the toolbar icons are: the app is built with
- * a relative base and can be served from a subpath.
+ * rather than loudly, since there is no CSP to stop it. The URL is resolved
+ * against the deployment root for the same reason the toolbar icons are -- see
+ * assetUrl.ts, which is also where the reason it is not simply `/fonts/...`
+ * lives.
  *
  * The fallback stack is kept and the range declared: before the file lands, if
  * it never lands, or for a character outside latin, the platform's own face
  * answers instead.
+ *
+ * Built at install time rather than held as a constant: resolving the URL needs
+ * a document, and the rest of this module is a set of plain strings that a test
+ * suite reads without one.
  */
-const FONT_CSS = `
+function fontCss(): string {
+  return `
 @font-face {
   font-family: 'Google Sans Flex';
   font-style: normal;
   font-weight: 100 1000;
   font-display: swap;
-  src: url('./fonts/google-sans-flex-latin.woff2') format('woff2');
+  src: url('${asset('fonts/google-sans-flex-latin.woff2')}') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
     U+2212, U+2215, U+FEFF, U+FFFD;
 }
 `;
+}
 
 export const THEME_CSS = `
 :root {
@@ -228,7 +236,7 @@ export function injectStyle(id: string, css: string): void {
 /** Puts the tokens and the button roles in place. Safe to call from anywhere. */
 export function installTheme(): void {
   // The face first: an @font-face the tokens then name.
-  injectStyle('font', FONT_CSS);
+  injectStyle('font', fontCss());
   injectStyle('theme', THEME_CSS);
   injectStyle('buttons', BUTTON_CSS);
 }

@@ -11,10 +11,22 @@
 /sw.js
   Cache-Control: no-cache
 
+# Both shells. The bundle they pull in is content-hashed and immutable above;
+# the HTML that names it is the one file that must never be served stale, or a
+# deploy reaches nobody who has been here before.
 /
   Cache-Control: no-cache
 
 /index.html
+  Cache-Control: no-cache
+
+/demo
+  Cache-Control: no-cache
+
+/demo/
+  Cache-Control: no-cache
+
+/demo/index.html
   Cache-Control: no-cache
 
 /manifest.webmanifest
