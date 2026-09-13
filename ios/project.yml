@@ -1,0 +1,373 @@
+# The Xcode app target, generated rather than committed.
+#
+# A pbxproj is thousands of lines of UUIDs that Xcode rewrites on first save
+# and reports as "damaged" with no diagnostics when one entry is wrong. This
+# file is the project, reviewable in a diff; run `xcodegen generate` after
+# changing it or after adding a source file.
+#
+# Everything that is not pixels lives in the WalkyCore package instead, so it
+# can be tested without a simulator. See Package.swift.
+name: Walky
+
+options:
+  bundleIdPrefix: ch.pandermatt
+  deploymentTarget: { iOS: "17.0" }
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+packages:
+  Walky:
+    path: .
+
+# Building this
+# -------------
+#   xcodegen generate
+#   xcodebuild build -project Walky.xcodeproj -scheme Walky -sdk iphonesimulator \
+#     -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+#
+# That is the ordinary command, and it works once an iOS simulator *runtime* is
+# installed. Two things make installing one harder than it sounds, both learned
+# the hard way: it needs an admin account, and the download hangs at "Preparing
+# to download..." with no error at all behind iCloud Private Relay or on some
+# university networks.
+#
+# With no runtime installed, no -destination resolves and only this works:
+#
+#   xcodebuild build -project Walky.xcodeproj -target Walky -sdk iphonesimulator \
+#     -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO
+#
+#   -target, not -scheme       A scheme resolves a destination, which fails
+#                              outright with no runtime. A target builds against
+#                              the SDK, which is always present.
+#   -configuration Release     Having no scheme, -target does not propagate the
+#                              configuration to the package's sub-project, which
+#                              builds Release. Ask for Debug and the app hunts
+#                              WalkyCore.swiftmodule in Debug-iphonesimulator
+#                              while the package put it in Release-, reported as
+#                              the very misleading "no such module 'WalkyCore'".
+#   ARCHS + ONLY_ACTIVE_ARCH   Without an active architecture to infer, the build
+#                              computes none and "succeeds" having compiled
+#                              nothing and produced no binary.
+#
+# It compiles everything including .metal shaders, so it stays a real check even
+# when nothing can be run.
+#
+# Launching on a phone
+# --------------------
+# The first launch after each install is slow on a device and instant
+# afterwards. Almost none of that is the app: measured from kernel process
+# start, Walky is drawing its first frame 284ms in on a warm simulator launch
+# and 613ms in on a cold one, of which ~190-480ms is dyld and the frameworks,
+# before any of our code runs. What is slow on a device is the install:
+# iOS code-signs and validates every Mach-O in the bundle, and dyld has no
+# prebuilt launch closure yet. Xcode then waits to attach debugserver, which is
+# the "Running Walky on iPhone..." phase and is not the app starting at all.
+#
+# To tell the two apart, let Xcode finish, quit the app, and tap its icon on the
+# home screen. That launch is the app's own launch. If it is quick, nothing here
+# needs fixing.
+#
+# What did help: ENABLE_DEBUG_DYLIB below, which takes the bundle from three
+# Mach-Os to one.
+
+# Shared schemes, so a release run is a dropdown rather than a remembered chore.
+#
+# Without a `schemes:` block XcodeGen emits none, and Xcode autocreates one in
+# `xcuserdata` -- which is gitignored, is recreated on every `xcodegen generate`,
+# and whose Run action is **Debug**. Every device run anyone had ever done on
+# this project was therefore a debug build, and debug is about seventeen times
+# slower here: 4,000 walking agents cost 187 ms/tick debug against 10.8 ms
+# release. Twice now, "the app is slow" has turned out to mean that.
+#
+# These live in `xcshareddata`, so they survive regeneration and are the same
+# for anyone who clones.
+schemes:
+  Walky:
+    build:
+      targets: { Walky: all }
+    run: { config: Debug }
+    test: { config: Debug }
+    profile: { config: Release }
+    analyze: { config: Debug }
+    archive: { config: Release }
+
+  # The one to pick when measuring anything. Debugging is worse in it -- that is
+  # the trade, and it is the right one for a stopwatch.
+  Walky (Release):
+    build:
+      targets: { Walky: all }
+    run: { config: Release }
+    profile: { config: Release }
+    archive: { config: Release }
+
+targets:
+  Walky:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App
+        excludes:
+          - "Walky.icon/**"
+          - "Cross-Four.icon/**"
+          - "Cross-One.icon/**"
+          - "Ground-Blueprint.icon/**"
+          - "Ground-Classic.icon/**"
+          - "Ground-Lime.icon/**"
+          - "Ground-Magenta.icon/**"
+          - "Ground-Midnight.icon/**"
+          - "Ground-Orange.icon/**"
+          - "Ground-Paper.icon/**"
+          - "Ground-Rust.icon/**"
+          - "Ground-Sky.icon/**"
+          - "Ground-Teal.icon/**"
+          - "Walker-Lime.icon/**"
+          - "Walker-Magenta.icon/**"
+          - "Walker-Orange.icon/**"
+          - "Walker-Rust.icon/**"
+          - "Walker-Sky.icon/**"
+          - "Walker-Teal.icon/**"
+      # An Icon Composer document is one file, not a folder of loose layers --
+      # xcodegen would otherwise walk into every one of them and hand actool a
+      # pile of unrelated images and a stray JSON apiece. The alternates are
+      # generated: `swift run walky-icons`, from Sources/WalkyCore/AppIcons.swift.
+      - path: App/Walky.icon
+        type: file
+      - path: App/Cross-Four.icon
+        type: file
+      - path: App/Cross-One.icon
+        type: file
+      - path: App/Ground-Blueprint.icon
+        type: file
+      - path: App/Ground-Classic.icon
+        type: file
+      - path: App/Ground-Lime.icon
+        type: file
+      - path: App/Ground-Magenta.icon
+        type: file
+      - path: App/Ground-Midnight.icon
+        type: file
+      - path: App/Ground-Orange.icon
+        type: file
+      - path: App/Ground-Paper.icon
+        type: file
+      - path: App/Ground-Rust.icon
+        type: file
+      - path: App/Ground-Sky.icon
+        type: file
+      - path: App/Ground-Teal.icon
+        type: file
+      - path: App/Walker-Lime.icon
+        type: file
+      - path: App/Walker-Magenta.icon
+        type: file
+      - path: App/Walker-Orange.icon
+        type: file
+      - path: App/Walker-Rust.icon
+        type: file
+      - path: App/Walker-Sky.icon
+        type: file
+      - path: App/Walker-Teal.icon
+        type: file
+    dependencies:
+      # WalkyCore re-exports WalkySim, so the app gets both.
+      - package: Walky
+        product: WalkyCore
+      # Embedded into PlugIns and signed on the way in, which is where iOS looks
+      # for a Messages extension. The pack ships with the app; there is no
+      # separate thing to install.
+      - target: WalkyStickers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ch.pandermatt.walky
+        PRODUCT_NAME: Walky
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        # Matched to the package's swift-tools-version so the concurrency
+        # diagnostics at the module boundary are the same on both sides.
+        SWIFT_STRICT_CONCURRENCY: complete
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: Walky
+        # What `setAlternateIconName` may be given. actool takes a `.icon`
+        # document here as readily as for the primary: it compiles each one into
+        # Assets.car and writes a `CFBundleAlternateIcons` entry naming it, which
+        # is why no icon dictionary is declared under `info:` below. Loose PNGs
+        # at the bundle root are the usual shape for this and cannot be Liquid
+        # Glass, which is the whole reason for the detour.
+        #
+        # AppIconTests checks this list against `AppIcons.alternates`: that table
+        # is Swift and this is YAML, and an icon missing from here is simply
+        # never offered at runtime.
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES:
+          - Cross-Four
+          - Cross-One
+          - Ground-Blueprint
+          - Ground-Classic
+          - Ground-Lime
+          - Ground-Magenta
+          - Ground-Midnight
+          - Ground-Orange
+          - Ground-Paper
+          - Ground-Rust
+          - Ground-Sky
+          - Ground-Teal
+          - Walker-Lime
+          - Walker-Magenta
+          - Walker-Orange
+          - Walker-Rust
+          - Walker-Sky
+          - Walker-Teal
+        CODE_SIGN_STYLE: Automatic
+        # No team, and there does not need to be one for the Simulator, which
+        # is what everything except the room scan is verified on.
+        #
+        # RoomPlan is the exception: it needs LiDAR, so it runs on a real
+        # iPhone Pro and nowhere else. Signing for that without committing an
+        # Apple ID is one line on the command line --
+        #
+        #   xcodebuild ... -destination 'generic/platform=iOS' \
+        #     DEVELOPMENT_TEAM=XXXXXXXXXX -allowProvisioningUpdates
+        #
+        # -- or setting the team once in Xcode's Signing & Capabilities, which
+        # `xcodegen generate` then wipes, so the flag is the durable form. A
+        # free personal team is enough; the profile lasts seven days.
+        #
+        # Deliberately no `DEVELOPMENT_TEAM` key here: an empty one behaves
+        # exactly like an absent one, so a placeholder would buy nothing and
+        # commit somebody's Apple ID to the repo the first time it was filled in.
+        # One Mach-O, not three.
+        #
+        # Xcode 16 defaults Debug builds to a 40 KB stub executable plus a
+        # 2.2 MB Walky.debug.dylib plus a __preview.dylib, so that SwiftUI
+        # previews can hot-swap code. This project has no #Preview blocks at
+        # all, so all it buys here is two extra Mach-Os for the device to
+        # code-sign, validate and bind on the first launch after every install
+        # -- which is exactly the launch that felt slow. It costs nothing in
+        # the simulator, where signature validation is a no-op, which is why
+        # this is invisible until you run on a phone.
+        ENABLE_DEBUG_DYLIB: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Walky
+        UILaunchScreen: {}
+        # No UIUserInterfaceStyle and no UIStatusBarStyle here on purpose.
+        #
+        # Both were declared once, to keep a Mac from giving Walky a light
+        # title bar over a dark map. Declaring them costs the app any way of
+        # ever seeing the system's own appearance -- the window is the app's
+        # statement coming back -- and the Appearance setting's "System" would
+        # have quietly meant "Dark". RootView states the scheme instead, from
+        # that setting, so the default is still dark and the Mac title bar
+        # still black, but the app can now be told to stop saying so.
+        #
+        # The status bar follows the same statement: it sits over the map, and
+        # a fixed light style would put a white clock on the Paper ground.
+        ITSAppUsesNonExemptEncryption: false
+        # The app's first privacy key, and the only one it needs: MapKit's
+        # search and snapshotter want no permission at all, but RoomPlan is the
+        # camera, and iOS kills an app that opens one without a reason string.
+        #
+        # Worded as what the scan is *for* rather than as what it uses, which is
+        # what the prompt is asking on the user's behalf. Kept to one sentence:
+        # the alert gives it one line.
+        NSCameraUsageDescription: >-
+          Walky scans a room with the camera to turn its walls and doorways into
+          a map you can run a crowd through.
+        # Same rule as the camera line: what it is *for*, in one sentence. Only
+        # ever asked for when somebody taps a button that says so -- Walky never
+        # follows you about, it asks once and hangs a map on the answer.
+        NSLocationWhenInUseUsageDescription: >-
+          Walky uses where you are to import the map around you, and to put the
+          real ground under a room you have scanned.
+        # `.walky`: a map as a file.
+        #
+        # Exported rather than imported, because this app is where the type
+        # comes from, and conforming to `public.data` rather than
+        # `public.content` because the payload is the codec's bytes -- the same
+        # bytes a share link carries, which is what will let the web app open
+        # one. See `MapFile`.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: ch.pandermatt.walky.map
+            UTTypeDescription: Walky Map
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - walky
+        # And the other direction: what makes a `.walky` in Files, Mail or
+        # AirDrop offer to open in Walky. `Owner` because the type is ours;
+        # `LSItemContentTypes` rather than an extension list so a file that
+        # arrives without its extension still matches.
+        # False, and stated rather than left to be guessed: opening a map copies
+        # it onto the canvas, it does not edit the file where it sits. Saving is
+        # a separate, explicit trip through the export sheet -- see
+        # `WalkyMapDocument` for why this is not a document-based app.
+        LSSupportsOpeningDocumentsInPlace: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Walky Map
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - ch.pandermatt.walky.map
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+  # The iMessage sticker pack: no code, no binary, one compiled asset
+  # catalogue. Everything in Stickers.xcstickers is written by
+  # ../web/tools/stickers.ts and committed -- the stickers cut out of the drawn
+  # contact sheets in web/tools/sheets, the drawer icon over them still built
+  # from the same primitives as the app icon. See web/README.md for what is in
+  # the pack and why the ground is transparent.
+  WalkyStickers:
+    type: app-extension.messages-sticker-pack
+    platform: iOS
+    deploymentTarget: "17.0"
+    # The catalogue only. Info.plist is deliberately outside this path: named
+    # here it would be copied into the bundle as a resource *as well as* being
+    # the bundle's plist.
+    sources:
+      - path: Stickers/Stickers.xcstickers
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ch.pandermatt.walky.stickers
+        PRODUCT_NAME: WalkyStickers
+        ASSETCATALOG_COMPILER_APPICON_NAME: iMessage App Icon
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # The extension is a payload of the app, never installed on its own.
+        SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Automatic
+    # Generated, like the app's, and that is the point: iOS refuses to install an
+    # app whose embedded extension carries a different CFBundleShortVersionString,
+    # and two plists written by the same generator agree on it by construction
+    # where two written by hand agree until somebody edits one.
+    #
+    # There is no NSExtensionPrincipalClass to write out beyond the system's own
+    # browser: the target has no code. Its build phase is Resources and nothing
+    # else, and the executable in the .appex is a stub Xcode links for it.
+    info:
+      path: Stickers/Info.plist
+      properties:
+        # The name under the pack in the Messages app drawer.
+        CFBundleDisplayName: Walky
+        # Lets a recipient who does not have Walky keep the sticker anyway, which
+        # is the only way a pack ever travels further than the app does. Written
+        # here rather than as INFOPLIST_KEY_NSStickerSharingLevel, which is a
+        # setting only the GENERATE_INFOPLIST_FILE path reads -- set alongside a
+        # generated plist it is silently inert, and the built .appex simply does
+        # not have the key.
+        NSStickerSharingLevel: OS
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.message-payload-provider
+          NSExtensionPrincipalClass: StickerBrowserViewController

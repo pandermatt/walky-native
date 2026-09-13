@@ -1,0 +1,65 @@
+{
+  "info": {
+    "version": 1,
+    "author": "xcode"
+  },
+  "properties": {
+    "grid-size": "regular"
+  },
+  "stickers": [
+    {
+      "filename": "walky-time.sticker"
+    },
+    {
+      "filename": "on-my-way.sticker"
+    },
+    {
+      "filename": "where-are-we-going.sticker"
+    },
+    {
+      "filename": "exploring-new-routes.sticker"
+    },
+    {
+      "filename": "pathfinding-intensifies.sticker"
+    },
+    {
+      "filename": "nope-wall.sticker"
+    },
+    {
+      "filename": "lost-in-the-maze.sticker"
+    },
+    {
+      "filename": "so-crowded.sticker"
+    },
+    {
+      "filename": "excuse-me.sticker"
+    },
+    {
+      "filename": "one-more-stop.sticker"
+    },
+    {
+      "filename": "no-energy-left.sticker"
+    },
+    {
+      "filename": "one-more-simulation.sticker"
+    },
+    {
+      "filename": "coffee-first.sticker"
+    },
+    {
+      "filename": "better-at-home.sticker"
+    },
+    {
+      "filename": "same-place-different-day.sticker"
+    },
+    {
+      "filename": "follow-my-path.sticker"
+    },
+    {
+      "filename": "progress-not-perfection.sticker"
+    },
+    {
+      "filename": "goal-reached.sticker"
+    }
+  ]
+}
