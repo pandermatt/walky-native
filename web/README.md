@@ -61,7 +61,7 @@ first time it was built:
 | File | Shows |
 |---|---|
 | `screen-draw.webp` | A drawn room and a painted crowd finding the goal, on the blueprint ground. |
-| `screen-measure.webp` | *Measure detour* over Zurich's old town, imported from `Rindermarkt, Zürich` at 380 m and 1:10: Walky's route from Spitalgasse to Untere Zäune at 510 m, against 449 m on the pavements, 0.88×. |
+| `screen-measure.webp` | *Measure detour* over Zurich's old town, imported from `Rindermarkt, Zürich` at 380 m and **1:1**: Walky's route (orange) from Spitalgasse to Untere Zäune at 367 m, against 441 m on the pavements (blue), 1.20×. Taken at life size on purpose: at 1:10 the obstacle inflation seals every lane narrower than about 9 m, so in an old town Walky can only detour or find nothing, and the same two points measured 510 m against 449 m. |
 | `screen-import.webp` | Siena's Piazza del Campo, imported from `Piazza del Campo, Siena` at 380 m across and 1:10, with a crowd leaving the square for a goal to the north-west — away from the Palazzo Pubblico, which OpenStreetMap did not return as a building and a crowd would otherwise walk straight through. |
 
 Two rules for picking a place, both learned by getting them wrong the first
