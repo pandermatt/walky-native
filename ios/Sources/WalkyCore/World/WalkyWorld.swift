@@ -105,6 +105,19 @@ public final class WalkyWorld: PointerHost {
   public private(set) var activeTool: ToolId?
   public var tool: (any Tool)? { activeTool.flatMap { tools[$0] } }
 
+  /// An outline to draw that no tool is holding.
+  ///
+  /// A preview has always belonged to a tool, because until now the only thing
+  /// that proposed a shape was a finger. The scene generator proposes one too,
+  /// arriving a room at a time while the model is still writing, and it has no
+  /// finger and no tool -- so the renderer needs somewhere else to look.
+  ///
+  /// Only ever read when no tool is armed, so an armed tool's own preview still
+  /// wins and this cannot leave a stale outline under a live gesture.
+  public var transientPreview: ToolPreview? {
+    didSet { requestRender() }
+  }
+
   public init() {
     settings.restore()
     tools[.wall] = WallTool()
@@ -257,11 +270,25 @@ public final class WalkyWorld: PointerHost {
   }
 
   public func addPedestrians(_ at: Point) {
-    let spots = pedestrianBlock(at, nil)
-    if spots.isEmpty { return }
+    addPedestrians(at, cells: nil)
+  }
+
+  /// A crowd of a size somebody asked for, in one edit.
+  ///
+  /// `cells` is the block's width in bodies, so the count is about its square.
+  /// Its own entry point rather than a loop over `addPedestrians` for the
+  /// reason `addWalls` exists: that checkpoints per call, and a checkpoint
+  /// copies every wall on the map, so painting a described crowd of two hundred
+  /// through it would be a couple of hundred full copies and would bury the
+  /// forty-deep undo stack under a single import.
+  @discardableResult
+  public func addPedestrians(_ at: Point, cells: Int?) -> Int {
+    let spots = pedestrianBlock(at, cells)
+    if spots.isEmpty { return 0 }
     checkpoint()
     for p in spots { agents.add(p, randomBrightColor()) }
     touch()
+    return spots.count
   }
 
   /// Says, once, that a tool has to be picked.

@@ -60,6 +60,13 @@ struct RootView: View {
         TouchCanvas(router: router).ignoresSafeArea()
       }
 
+      // Above the map and the touch surface, below the chrome. Outside the
+      // `chrome.hidden` check on purpose: it is not a control, and a clean
+      // capture of a map still wants to say when the map is not finished yet.
+      if #available(iOS 26.0, *) {
+        GeneratingBorder(generator: model.describer)
+      }
+
       // Everything the app draws over the map, gone in one place for a clean
       // capture -- the notice and both banners as well as the bar, since a
       // screenshot with a capsule floating in it is not a clean screenshot.
@@ -180,6 +187,18 @@ struct RootView: View {
     }
   }
 
+  /// The describe-a-map section, or nothing at all below iOS 26.
+  ///
+  /// Type-erased on the way out like the other three, and gated here rather
+  /// than inside the section because the section's own type is
+  /// `@available(iOS 26)` -- there is nothing to construct on an older phone,
+  /// not even something that says so.
+  private var describeSection: AnyView? {
+    guard #available(iOS 26.0, *) else { return nil }
+    return AnyView(DescribeSceneSection(world: model.world, generator: model.describer,
+                                       onStart: { sheet = nil }))
+  }
+
   @ViewBuilder private func content(of which: Sheet) -> some View {
     switch which {
     case .welcome:
@@ -191,13 +210,18 @@ struct RootView: View {
                         mapSection: AnyView(
                           RealMapSection(world: model.world, basemap: model.basemap,
                                          importer: model.importer,
+                                         locator: model.locator,
                                          dark: (windowScheme ?? scheme) == .dark)),
                         roomSection: AnyView(
                           RoomScanSection(world: model.world, scanner: model.scanner,
+                                          basemap: model.basemap,
+                                          locator: model.locator,
+                                          dark: (windowScheme ?? scheme) == .dark,
                                           // Swapping the item on the one sheet
                                           // rather than presenting from inside
                                           // it: `isCovered` stays one fact.
                                           onScan: { sheet = .roomScan })),
+                        describeSection: describeSection,
                         // Dismissing Settings first, because the exporter and
                         // the importer are sheets too and iOS will not stack a
                         // second one over the first: without this the file

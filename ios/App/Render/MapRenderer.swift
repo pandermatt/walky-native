@@ -299,7 +299,9 @@ enum MapRenderer {
   /// `overlay.ts`, drawn over the map rather than under it.
   private static func drawPreview(_ world: WalkyWorld, into ctx: inout GraphicsContext,
                                   hairline: Double, scale: Double, ink: RGB) {
-    guard let preview = world.tool?.preview() else { return }
+    // A tool's own outline wins; the transient one is for a proposal with no
+    // tool behind it, which today means the scene generator streaming a plan in.
+    guard let preview = world.tool?.preview() ?? world.transientPreview else { return }
     let dash = StrokeStyle(lineWidth: hairline, dash: [9 / scale, 9 / scale])
 
     if !preview.pendingWallPoints.isEmpty {

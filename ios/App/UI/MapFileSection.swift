@@ -24,8 +24,6 @@ struct MapFileSection: View {
       // person. Both hand over a `.walky`, so a map sent by AirDrop or Messages
       // opens on the other phone rather than arriving as something to look at.
       Button("Share…", systemImage: "square.and.arrow.up", action: onShare)
-    } header: {
-      Text("Map file")
     } footer: {
       // Two lines, as every other footer in this sheet. The extension is worth
       // naming because it is the thing somebody will look for in Files, and the

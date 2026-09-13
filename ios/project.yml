@@ -276,6 +276,12 @@ targets:
         NSCameraUsageDescription: >-
           Walky scans a room with the camera to turn its walls and doorways into
           a map you can run a crowd through.
+        # Same rule as the camera line: what it is *for*, in one sentence. Only
+        # ever asked for when somebody taps a button that says so -- Walky never
+        # follows you about, it asks once and hangs a map on the answer.
+        NSLocationWhenInUseUsageDescription: >-
+          Walky uses where you are to import the map around you, and to put the
+          real ground under a room you have scanned.
         # `.walky`: a map as a file.
         #
         # Exported rather than imported, because this app is where the type

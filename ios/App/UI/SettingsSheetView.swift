@@ -21,6 +21,11 @@ struct SettingsSheetView: View {
   /// Type-erased like the one above, which also keeps this `Form` inside the
   /// type checker's budget -- see `groundSection`.
   var roomSection: AnyView?
+  /// Describing one in words. Nil below iOS 26 and on a phone Apple
+  /// Intelligence does not run on -- though the section itself decides what is
+  /// left to offer when only the *model* is missing, the way the room section
+  /// does without a LiDAR camera.
+  var describeSection: AnyView?
   /// Saving and opening a `.walky`. Type-erased for the same two reasons, and
   /// first of the three: opening a map you already have is the shortest way to
   /// get one.
@@ -30,41 +35,27 @@ struct SettingsSheetView: View {
   var body: some View {
     NavigationStack {
       Form {
-        Section("Pedestrians") {
-          slider(.speed, format: "%.2f m/s")
-          slider(.pedestrianRadius)
-          slider(.personalSpace)
-          slider(.brushSize, warning: brushWarning)
-        }
-        Section("Drawing") {
-          slider(.borderThickness)
-        }
-
-        if let fileSection { fileSection }
-        if let mapSection { mapSection }
-        if let roomSection { roomSection }
-        Section("Appearance") {
-          Picker("Appearance", selection: $settings.appearance) {
-            ForEach(Appearance.allCases) { Text($0.label).tag($0) }
-          }
-          .pickerStyle(.segmented)
-          .labelsHidden()
-        }
-
-        groundSection
-        accentSection
-        AppIconSection(accent: settings.accent.color)
-
-        Section("Show") {
-          Toggle("Convex hulls", isOn: $settings.showConvexHull)
-          Toggle("Route to goal", isOn: $settings.showLineToTarget)
-          Toggle("Personal space", isOn: $settings.showPersonalSpace)
-          Toggle("Debug info", isOn: $settings.showDebug)
-          Toggle("Basemap", isOn: $settings.showBasemap)
-        }
+        // Five rows rather than thirteen sections.
+        //
+        // What was here before was one scroll of everything: four sliders, three
+        // importers, a file section, four separate takes on how the app looks,
+        // two lists of toggles and an about box -- and no two of them at the
+        // same altitude. The three importers are one question ("where does a
+        // map come from"), Appearance/Ground/Accent/App icon are one question
+        // ("what does it look like"), and neither was findable next to a
+        // brush-size slider.
+        //
+        // Grouped by the question rather than by the control, which is also why
+        // "Pedestrians" and "Drawing" became Crowd and Tools: speed and body
+        // size describe the model, brush and border describe the things you
+        // draw with, and the old split had `brushSize` filed under the crowd it
+        // paints rather than the brush it is.
         Section {
-          Toggle("Hide controls", isOn: $chrome.hidden)
-        } header: { Text("Recording") } footer: { Text(Self.recordingFooter) }
+          page("Maps", "map", mapsPage)
+          page("Crowd", "figure.walk", CrowdPage(settings: settings))
+          page("Appearance", "paintpalette", appearancePage)
+          page("Show", "eye", ShowPage(settings: settings, chrome: chrome))
+        }
 
         Section {
           Text(Self.about)
@@ -86,6 +77,70 @@ struct SettingsSheetView: View {
       .onChange(of: settings.groundId) { _, _ in onChange() }
       // Appearance moves the ground now, not just the chrome.
       .onChange(of: settings.appearance) { _, _ in onChange() }
+    }
+  }
+
+  // MARK: - The pages
+
+  /// Where a map comes from, and what to do with the one you have.
+  ///
+  /// A page each rather than four sections stacked, and the reason is the
+  /// settings rather than the length: importing owns an area and a scale,
+  /// scanning owns the furniture switch and a role per doorway, and stacked
+  /// together nothing said which slider belonged to which source. A page
+  /// boundary says it.
+  ///
+  /// The row is also where "Describe a map" wears its BETA, so it is met
+  /// before the text field rather than after.
+  @ViewBuilder private var mapsPage: some View {
+    Form {
+      Section {
+        if let fileSection { page("Map file", "doc", Form { fileSection }) }
+        if let mapSection { page("Real map", "map", Form { mapSection }) }
+        if let roomSection { page("Your room", "ruler", Form { roomSection }) }
+        if let describeSection {
+          page("Describe a map", "sparkles", Form { describeSection }, beta: true)
+        }
+      } footer: {
+        Text("Four ways to get a map: open one you have, import a real place, "
+           + "scan a room, or describe one.")
+      }
+    }
+  }
+
+  @ViewBuilder private var appearancePage: some View {
+    Form {
+      Section("Appearance") {
+        Picker("Appearance", selection: $settings.appearance) {
+          ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+      }
+      groundSection
+      accentSection
+      AppIconSection(accent: settings.accent.color)
+    }
+  }
+
+  /// One row into one page. `Label` rather than a bare title so the list is
+  /// scannable by shape as well as by word -- five words in a column read as a
+  /// wall, five icons do not.
+  private func page(_ title: String, _ icon: String,
+                    _ destination: some View, beta: Bool = false) -> some View {
+    NavigationLink {
+      destination
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    } label: {
+      Label {
+        HStack(spacing: 6) {
+          Text(title)
+          if beta { BetaTag() }
+        }
+      } icon: {
+        Image(systemName: icon)
+      }
     }
   }
 
@@ -299,5 +354,89 @@ struct SettingsSheetView: View {
     let n = Int(settings.brushSize)
     guard n > 9 else { return nil }
     return "\(n) x \(n) — that is \(n * n) pedestrians a tap, more while you drag."
+  }
+}
+
+/// The controls that write, as views of their own.
+///
+/// Views rather than `@ViewBuilder` properties on the sheet: each is its own
+/// type-checking unit, which is the budget this Form has run out of twice
+/// before -- see the note on `groundSection` -- and each takes only the object
+/// it actually edits.
+///
+private struct CrowdPage: View {
+  @Bindable var settings: Settings
+
+  var body: some View {
+    Form {
+      Section("The crowd") {
+        slider(.speed, format: "%.2f m/s")
+        slider(.pedestrianRadius)
+        slider(.personalSpace)
+      }
+      // Brush and border together, which is the split "Pedestrians"/"Drawing"
+      // got wrong: brush size was filed with the crowd it paints rather than
+      // with the brush it is, leaving Drawing a section of one slider.
+      Section("Tools") {
+        slider(.brushSize, warning: brushWarning)
+        slider(.borderThickness)
+      }
+    }
+  }
+
+  /// What the brush actually costs at its current size.
+  ///
+  /// A number rather than a caution, because the number is the surprising part:
+  /// the brush is n across, so a *tap* drops n x n pedestrians, and a drag
+  /// paints continuously.
+  private var brushWarning: String? {
+    let n = Int(settings.brushSize)
+    guard n > 9 else { return nil }
+    return "\(n) x \(n) — that is \(n * n) pedestrians a tap, more while you drag."
+  }
+
+  private func slider(_ setting: NumericSetting, format: String = "%.0f",
+                      warning: String? = nil) -> some View {
+    let r = setting.range
+    return VStack(alignment: .leading, spacing: 2) {
+      HStack {
+        Text(setting.label)
+        Spacer()
+        Text(String(format: format, settings[keyPath: setting.keyPath]))
+          .foregroundStyle(.secondary).monospacedDigit()
+      }
+      Slider(value: Binding(get: { settings[keyPath: setting.keyPath] },
+                            set: { settings[keyPath: setting.keyPath] = $0 }),
+             in: r.min...r.max, step: r.step)
+      if let warning {
+        Label(warning, systemImage: "exclamationmark.triangle.fill")
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+}
+
+private struct ShowPage: View {
+  @Bindable var settings: Settings
+  @Bindable var chrome: Chrome
+
+  var body: some View {
+    Form {
+      Section("Show") {
+        Toggle("Convex hulls", isOn: $settings.showConvexHull)
+        Toggle("Route to goal", isOn: $settings.showLineToTarget)
+        Toggle("Personal space", isOn: $settings.showPersonalSpace)
+        Toggle("Debug info", isOn: $settings.showDebug)
+        Toggle("Basemap", isOn: $settings.showBasemap)
+      }
+      Section {
+        Toggle("Hide controls", isOn: $chrome.hidden)
+      } header: { Text("Recording") } footer: {
+        Text("Hides the bar and status bar. Tap the map to restore; record from "
+           + "Control Centre.")
+      }
+    }
   }
 }

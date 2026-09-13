@@ -82,6 +82,21 @@ final class AppModel {
   let basemap = Basemap()
   let importer = MapImporter()
   let scanner = RoomScanner()
+  /// Shared, so the permission is asked for once by whichever of the map
+  /// importer and the room scanner gets there first.
+  let locator = Locator()
+  /// Nil below iOS 26, where `FoundationModels` does not exist to be asked.
+  /// Availability *within* 26 -- a phone that cannot run Apple Intelligence --
+  /// is the generator's own business, since the section still has its example
+  /// plan to offer.
+  private var describerBox: AnyObject?
+  @available(iOS 26.0, *)
+  var describer: SceneGenerator {
+    if let existing = describerBox as? SceneGenerator { return existing }
+    let made = SceneGenerator()
+    describerBox = made
+    return made
+  }
   let detours = DetourRouter()
   let toolbar = ToolbarState()
   let notice = Notice()
@@ -129,6 +144,9 @@ final class AppModel {
       self.scanner.place(into: self.world)
     }
     scanner.onNotice = { [weak self] line in self?.show(line) }
+    if #available(iOS 26.0, *) {
+      describer.onNotice = { [weak self] line in self?.show(line) }
+    }
     world.onDetourRequested = { [weak self] a, b in
       guard let self else { return }
       self.detours.route(from: a, to: b, world: self.world)

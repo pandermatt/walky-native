@@ -70,6 +70,14 @@ final class RoomScanner {
   private(set) var doorways: [Doorway] = []
 
   private var room: ScannedRoom?
+  /// The extent of the room last placed, in world units, or nil when nothing
+  /// has been placed this session. Kept so the basemap can be fetched *after*
+  /// the room is on the map rather than during the scan: a scan is taken
+  /// walking about, and asking for a location then would be asking mid-walk.
+  private(set) var placed: CGRect?
+  /// Set once the ground has been put under the room, so the offer is made
+  /// once rather than every time the section redraws.
+  private(set) var hasGround = false
 
   /// A scan landed. The capture sheet is closing at this moment and there is no
   /// settings sheet behind it -- swapping the one sheet is what put the capture
@@ -217,49 +225,63 @@ final class RoomScanner {
 
     Task {
       step(.placing)
-      world.clearAll()
-      // No anchor: a room is not a place on the earth, and the nil is what
-      // makes `measure` report at 1:1.
-      world.addWalls(plan.walls)
-      if !plan.furniture.isEmpty {
-        // A duller colour than the walls, and its own edit -- undoing furniture
-        // without losing the room is the thing somebody will want.
-        world.addWalls(plan.furniture, WallOptions(color: (120, 120, 130)))
-      }
-
-      // Order matters, and only because of how goals work: `setGoalAt` is what
-      // aims the doors, and a door with no goal emits nobody. So the slabs go
-      // down, then the doors, then the aim.
-      var exit: Point?
-      for (i, doorway) in plan.doorways.enumerated() where roles[i] == .exit {
-        if world.addWallShape([doorway.slab], WallOptions(color: (0, 200, 120))) {
-          exit = doorway.at
-        }
-      }
-      for (i, doorway) in plan.doorways.enumerated() where roles[i] == .entrance {
-        // **The doorway is the generator.** One object where there used to be
-        // two: a slab filling the gap plus a block of floor beside it. A
-        // generator is a wall now, so the slab itself is what people come out of, and
-        // which side they come out of is answered by where the goal is -- see
-        // `WalkyWorld.doorMouth`. For a room that is indoors, which is where
-        // the exit is.
-        //
-        // Filling the gap is not only tidier, it is necessary: left open, the
-        // first thing the crowd did on the sample room was walk back out of the
-        // doorway it had just come in by, because the way round the outside to
-        // the exit was shorter than the way past the table.
-        world.addGeneratorShape([doorway.slab])
-      }
-      if let exit { world.setGoalAt(exit) }
-
-      world.frameImport()
-      step(.routing)
-      await world.navReady()
+      // The order this depends on -- slabs, then doors, then the aim -- lives
+      // in `WalkyWorld.place` now, shared with the scene generator so the two
+      // importers cannot drift into placing a room two different ways.
+      let exit = await world.place(RoomPlacement(
+        walls: plan.walls,
+        furniture: plan.furniture,
+        exits: plan.doorways.enumerated().filter { roles[$0.offset] == .exit }.map(\.element),
+        entrances: plan.doorways.enumerated().filter { roles[$0.offset] == .entrance }
+          .map(\.element))) { self.step(.routing) }
 
       progress = nil
+      placed = world.contentBounds().map {
+        CGRect(x: $0.minX, y: $0.minY, width: $0.maxX - $0.minX, height: $0.maxY - $0.minY)
+      }
+      hasGround = false
       let line = summary(plan, hasExit: exit != nil)
       phase = .done(line)
       onNotice?(line)
+    }
+  }
+
+  /// Put the real ground under the room that was just placed.
+  ///
+  /// Offered rather than automatic, and afterwards rather than during: a scan
+  /// is taken walking around a room, and the useful location is the one you are
+  /// standing in when you have finished.
+  ///
+  /// Setting `geoAnchor` is what makes the renderer draw the ground at all --
+  /// and it has a second effect worth knowing: the measure tool starts asking
+  /// Apple for a walking route between the two points. Indoors that answer is
+  /// a route round the block and means nothing, which is the price of the
+  /// picture and the reason this is a button rather than a default.
+  func addGround(_ locator: Locator, into world: WalkyWorld,
+                 basemap: Basemap, dark: Bool) {
+    guard let placed else { return }
+    step(.placing)
+    Task {
+      do {
+        // Life size: a scanned room is not a model of anywhere, so the ratio to
+        // the earth is one. `scale: 1` is also what keeps `measure` honest.
+        let anchor = GeoAnchor(origin: try await locator.current(), scale: 1)
+        world.geoAnchor = anchor
+        // Centred on the room and wider than it, so the building it is in shows
+        // around it rather than one blurred roof filling the screen.
+        let margin = jsMax(placed.width, placed.height)
+        let rect = placed.insetBy(dx: -margin, dy: -margin)
+        basemap.snapshot(anchor: anchor, worldRect: rect, dark: dark) { [weak self] problem in
+          guard let self else { return }
+          if let problem { self.phase = .failed(problem); return }
+          self.hasGround = true
+          self.progress = nil
+          self.phase = .done("The ground is Apple's, from where you are.")
+        }
+      } catch {
+        progress = nil
+        phase = .failed(error.localizedDescription)
+      }
     }
   }
 

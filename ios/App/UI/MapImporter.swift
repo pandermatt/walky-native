@@ -43,7 +43,27 @@ final class MapImporter {
   }
 
   var query: String = ""
-  private(set) var phase: Phase = .idle
+  private(set) var phase: Phase = .idle {
+    didSet {
+      // Every way an attempt can end runs through here -- `.done` from
+      // `install`, `.failed` from `fail`, `.refused` set directly by the budget
+      // check -- which is why the watchdog is stopped on the phase rather than
+      // at each of those call sites, where the third one would have been
+      // forgotten.
+      switch phase {
+      // Terminal, obviously. But also every phase past the network: the offer
+      // is for a *wait on somebody else's server*, and asking Overpass again is
+      // a thing that can help. Merging, placing and the visibility rebuild are
+      // our own arithmetic, and they are slow because the map is big -- asking
+      // again just does the same slow work a second time. So the offer covers
+      // `.searching` and `.fetching` and nothing else.
+      case .done, .failed, .refused, .idle, .merging, .placing, .routing:
+        stopWaiting()
+      case .searching, .fetching:
+        break
+      }
+    }
+  }
   /// How far along, where that can be counted. Nil during a phase whose length
   /// is not knowable -- see `fraction`.
   private(set) var progress: Double?
@@ -94,6 +114,24 @@ final class MapImporter {
 
   private let overpass = OverpassClient()
 
+  /// What was asked for, so a retry can ask again without anybody retyping it.
+  private enum Request { case place(String), here }
+  private var last: Request?
+  private var task: Task<Void, Never>?
+  private var watchdog: Task<Void, Never>?
+
+  /// True once the attempt in flight has been going long enough to look stuck.
+  ///
+  /// Neither half of an import has a length that can be known in advance:
+  /// Overpass is somebody else's server on a fair-use policy, and the
+  /// visibility rebuild is superquadratic in corners. So rather than guess a
+  /// timeout and cancel work that was about to succeed, this only *offers* a
+  /// way out and lets whoever is waiting decide.
+  private(set) var isSlow = false
+
+  /// How long to wait before saying so.
+  private static let patience: Duration = .seconds(20)
+
   var isBusy: Bool {
     switch phase {
     case .searching, .fetching, .merging, .placing, .routing: true
@@ -104,48 +142,106 @@ final class MapImporter {
   func importPlace(into world: WalkyWorld, basemap: Basemap, dark: Bool) {
     let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
-    step(.searching)
-
-    Task {
-      do {
-        let place = try await find(text)
-        let anchor = GeoAnchor(origin: place, scale: scale)
-        step(.fetching)
-
-        let box = anchor.boundingBox(sideMetres: sideMetres)
-        let footprints = try await overpass.buildings(in: box)
-        let raw = footprintPolygons(footprints, anchor)
-
-        guard !raw.isEmpty else {
-          fail("OpenStreetMap has no buildings mapped there.")
-          return
-        }
-
-        step(.merging)
-        // Fewer, simpler shapes for the same buildings -- and run *before* the
-        // budget, so a merge can rescue an import the raw corners would refuse.
-        let polygons = mergeFootprints(raw, simplifyTolerance: Self.simplifyTolerance(world))
-        let corners = ImportBudget.vertices(polygons)
-
-        // The rebuild is superquadratic in corners, so past the ceiling this is
-        // not a slow import but an app that stutters on every later wall edit.
-        // That is a warning to carry rather than a decision to make for
-        // somebody, so the polygons are kept and the choice is offered.
-        guard ImportBudget.fits(polygons) else {
-          phase = .refused(refusal(raw: raw, merged: polygons, corners: corners),
-                           Ready(polygons: polygons, anchor: anchor, corners: corners))
-          progress = nil
-          return
-        }
-
-        await install(polygons, anchor: anchor, corners: corners,
-                      into: world, basemap: basemap, dark: dark)
-      } catch let error as OverpassError {
-        fail(describe(error))
-      } catch {
-        fail(error.localizedDescription)
-      }
+    last = .place(text)
+    begin()
+    task = Task {
+      do { try await importAt(find(text), into: world, basemap: basemap, dark: dark) }
+      catch let error as OverpassError { fail(describe(error)) }
+      catch { fail(error.localizedDescription) }
     }
+  }
+
+  /// Import the neighbourhood the phone is standing in.
+  ///
+  /// The same import with the search skipped: a place name is one way to say
+  /// where, and being there is another. Everything past the coordinate --
+  /// Overpass, the merge, the budget, the ground -- is shared, which is the
+  /// point of splitting `importAt` out.
+  func importHere(_ locator: Locator, into world: WalkyWorld,
+                  basemap: Basemap, dark: Bool) {
+    last = .here
+    begin()
+    task = Task {
+      do { try await importAt(locator.current(), into: world,
+                              basemap: basemap, dark: dark) }
+      catch let error as OverpassError { fail(describe(error)) }
+      catch { fail(error.localizedDescription) }
+    }
+  }
+
+  private func importAt(_ place: Coordinate, into world: WalkyWorld,
+                        basemap: Basemap, dark: Bool) async throws {
+    let anchor = GeoAnchor(origin: place, scale: scale)
+    step(.fetching)
+
+    let box = anchor.boundingBox(sideMetres: sideMetres)
+    let footprints = try await overpass.buildings(in: box)
+    let raw = footprintPolygons(footprints, anchor)
+
+    guard !raw.isEmpty else {
+      fail("OpenStreetMap has no buildings mapped there.")
+      return
+    }
+
+    step(.merging)
+    // Fewer, simpler shapes for the same buildings -- and run *before* the
+    // budget, so a merge can rescue an import the raw corners would refuse.
+    let polygons = mergeFootprints(raw, simplifyTolerance: Self.simplifyTolerance(world))
+    let corners = ImportBudget.vertices(polygons)
+
+    // The rebuild is superquadratic in corners, so past the ceiling this is
+    // not a slow import but an app that stutters on every later wall edit.
+    // That is a warning to carry rather than a decision to make for
+    // somebody, so the polygons are kept and the choice is offered.
+    guard ImportBudget.fits(polygons) else {
+      phase = .refused(refusal(raw: raw, merged: polygons, corners: corners),
+                       Ready(polygons: polygons, anchor: anchor, corners: corners))
+      progress = nil
+      return
+    }
+
+    await install(polygons, anchor: anchor, corners: corners,
+                  into: world, basemap: basemap, dark: dark)
+  }
+
+  /// Ask again for whatever was asked for last.
+  ///
+  /// Cancels the attempt in flight first. A retry that left the old one running
+  /// would have two imports racing to call `world.clearAll()` and place their
+  /// buildings, and the loser would win.
+  func retry(_ locator: Locator, into world: WalkyWorld, basemap: Basemap, dark: Bool) {
+    guard let last else { return }
+    cancel()
+    switch last {
+    case .place(let text):
+      query = text
+      importPlace(into: world, basemap: basemap, dark: dark)
+    case .here:
+      importHere(locator, into: world, basemap: basemap, dark: dark)
+    }
+  }
+
+  func cancel() {
+    task?.cancel()
+    task = nil
+    stopWaiting()
+  }
+
+  private func begin() {
+    step(.searching)
+    isSlow = false
+    watchdog?.cancel()
+    watchdog = Task { [weak self] in
+      try? await Task.sleep(for: Self.patience)
+      guard let self, !Task.isCancelled, self.isBusy else { return }
+      self.isSlow = true
+    }
+  }
+
+  private func stopWaiting() {
+    watchdog?.cancel()
+    watchdog = nil
+    isSlow = false
   }
 
   /// Place an import that was refused, at the cost the refusal named.

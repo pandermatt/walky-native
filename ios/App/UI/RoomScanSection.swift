@@ -17,6 +17,9 @@ import WalkySim
 struct RoomScanSection: View {
   let world: WalkyWorld
   @Bindable var scanner: RoomScanner
+  let basemap: Basemap
+  let locator: Locator
+  let dark: Bool
   /// Raises the capture sheet, which `RootView` owns.
   let onScan: () -> Void
 
@@ -42,6 +45,16 @@ struct RoomScanSection: View {
         .disabled(scanner.isBusy)
       }
 
+      // Offered only once a room is actually on the map, because until then
+      // there is nothing to put ground under. Asked rather than assumed: it
+      // costs a location, and a scanned room is perfectly usable without one.
+      if scanner.placed != nil, !scanner.hasGround, !locator.isRefused {
+        Button("Put the real map underneath", systemImage: "map") {
+          scanner.addGround(locator, into: world, basemap: basemap, dark: dark)
+        }
+        .disabled(scanner.isBusy)
+      }
+
       if scanner.isBusy {
         ProgressView(value: scanner.progress, total: 1)
           .progressViewStyle(.linear)
@@ -60,8 +73,6 @@ struct RoomScanSection: View {
       }
 
       status
-    } header: {
-      Text("Your room")
     } footer: {
       Text(Self.footer)
     }
