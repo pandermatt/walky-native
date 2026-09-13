@@ -40,5 +40,11 @@
 /icons/*
   Cache-Control: public, max-age=604800
 
+# The landing page's App Store screenshots. Replaced when the app changes, not
+# when the site is rebuilt, so they get the icons' week rather than the bundle's
+# year -- long enough that a second visit does not refetch them.
+/screens/*
+  Cache-Control: public, max-age=604800
+
 /images/*
   Cache-Control: public, max-age=604800

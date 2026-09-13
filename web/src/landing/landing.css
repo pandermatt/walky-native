@@ -739,14 +739,108 @@ html[data-js] .reveal.is-visible {
 .section-head .lead { margin-top: var(--space-xs); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   12. THE BAND
+   12. THE BAND, AND THE SCREENSHOTS ON IT
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.band-inner { max-width: var(--measure); }
-.band-inner p { color: rgba(var(--c-band-text), 0.72); margin-top: var(--space-s); }
-.band-inner .label { color: rgba(var(--c-band-text), 0.6); }
-.band-inner code { color: rgba(var(--c-band-text), 0.92); }
-.band-inner .link-arrow { margin-top: var(--space-m); }
+.section--dark .label { color: rgba(var(--c-band-text), 0.6); }
+.section--dark .section-head { max-width: var(--measure); }
+
+/*
+ * Three phones in a row.
+ *
+ * No drawn bezel around them. The screenshots already carry the device's own
+ * frame -- the status bar, the rounded screen corners, the home indicator --
+ * and a second frame painted around that is a picture of a phone inside a
+ * picture of a phone.
+ *
+ * The radius is therefore not what makes the corner: the shot already has one,
+ * and what falls outside it is black, which on this band is invisible. It is
+ * there so the hairline below follows the device's corner instead of cutting
+ * across it. 27px is that corner measured off the file -- 62px in a 570px-wide
+ * shot -- at the ~250px the row renders each phone at on a desktop. A phone
+ * shown alone on a narrow screen is wider and wants a few pixels more; the
+ * difference is smaller than the hairline is thick.
+ */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-l);
+  margin-top: var(--space-l);
+}
+
+.shot { display: flex; flex-direction: column; gap: var(--space-xs); }
+
+.shot img {
+  width: 100%;
+  height: auto;
+  border-radius: 27px;
+  /* A hairline, because the paper shot's cream ground and the band's black
+     would otherwise meet with no edge at all and the phone would read as a
+     hole cut in the band. */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+
+.shot-caption {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: rgba(var(--c-band-text), 0.66);
+}
+
+/* The reset gives `strong` the page's ink, which on the black band is the ink
+   the band is made of. Everything inside the band takes the band's own text
+   colour instead, and emphasis here is the full-strength version of the muted
+   caption around it. */
+.section--dark strong { color: rgba(var(--c-band-text), 1); }
+
+.band-note {
+  max-width: var(--measure);
+  margin-top: var(--space-l);
+  color: rgba(var(--c-band-text), 0.72);
+}
+.band-note .link-arrow { margin-left: 4px; }
+
+/*
+ * Narrow: a row you swipe, not a row with things missing.
+ *
+ * Three columns do not fit under 900px and the obvious fix -- hide the ones
+ * that do not -- throws away a whole capability, and on a page that leads with
+ * the App Store it would throw away the last one first. So the grid becomes a
+ * scroller: every phone stays, at a size somebody can read, and the ones off
+ * the edge are a swipe away.
+ *
+ * The overflow is on the row and nowhere else. `.l-site` gives the section its
+ * page margin, so the scroller is inset from both edges and the page itself
+ * still never scrolls sideways -- which is the thing a horizontal scroller
+ * usually breaks.
+ */
+@media (max-width: 900px) {
+  .shots {
+    display: flex;
+    gap: var(--space-m);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    /* Room for the shadow, which a tight clip would slice off. */
+    padding-block: 4px;
+    /* Bleed to the page edges and pad back, so a phone can sit flush against
+       the margin while the next one is visibly cut off beyond it -- which is
+       what tells you the row scrolls. */
+    margin-inline: calc(var(--page-margin) * -1);
+    padding-inline: var(--page-margin);
+    scroll-padding-inline: var(--page-margin);
+  }
+  /* A scrollbar under a row of phones is chrome the row does not need; the cut
+     phone at the edge already says it scrolls. */
+  .shots::-webkit-scrollbar { display: none; }
+  .shots { scrollbar-width: none; }
+
+  .shot {
+    flex: 0 0 auto;
+    /* Wide enough to read the map in, narrow enough that the next one shows. */
+    width: min(74vw, 260px);
+    scroll-snap-align: start;
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    13. FOOTER

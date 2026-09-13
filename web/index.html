@@ -282,22 +282,83 @@
       </section>
 
       <section class="section section--dark">
-        <div class="l-site band-inner reveal">
-          <p class="label">Two ports, one model</p>
-          <h2>Checked against each other, bit for bit.</h2>
-          <p>
-            The Swift app is not a reimplementation that happens to look similar. The TypeScript
-            model records the crowd tick by tick into a fixture, the Swift model replays it, and the
-            two are compared as bit patterns rather than as values. Change a weight in the
-            behaviour and the web test suite fails until both sides are brought along.
-          </p>
-          <p>
+        <div class="l-site">
+          <div class="section-head reveal">
+            <p class="label">On iPhone</p>
+            <h2>Draw it, measure it, or import it.</h2>
+          </div>
+
+          <!--
+            Real screenshots, taken from the app running on an iPhone. Nothing
+            here is a mock-up: each one is a map somebody drew or imported and a
+            crowd the model moved, which is the only kind of picture a simulator
+            has any business showing.
+
+            One capability each, which is what stops the row being the same
+            picture three times in different colours. The numbers in the middle
+            shot are 13pt on a 402pt screen, so they land at about 8px in a
+            phone this size on a desktop -- texture, not information. The
+            caption carries them instead.
+
+            Widths and heights are stated so the row holds its space before the
+            files arrive; three phones reflowing after load would push the
+            footer down the page.
+          -->
+          <ul class="shots reveal">
+            <li class="shot">
+              <img
+                src="./screens/screen-draw.webp"
+                width="570"
+                height="1240"
+                loading="lazy"
+                decoding="async"
+                alt="Walky on an iPhone, blueprint theme: a pale crowd streaming through a gap between a blue and a cyan wall on a navy ground, heading for a yellow goal below."
+              />
+              <p class="shot-caption">
+                Draw a room, paint a crowd, and watch two hundred people find
+                the gap.
+              </p>
+            </li>
+            <li class="shot">
+              <img
+                src="./screens/screen-measure.webp"
+                width="570"
+                height="1240"
+                loading="lazy"
+                decoding="async"
+                alt="Walky on an iPhone showing Zurich's main station imported from OpenStreetMap. An orange line runs across the map between two marked points and a blue line loops the long way around the station, labelled 276 metres on foot against Apple 522 metres, 1.89 times."
+              />
+              <p class="shot-caption">
+                Price the walk between two points: <strong>276 m</strong> across
+                the map, against Apple Maps' <strong>522 m</strong> on real
+                pavements.
+              </p>
+            </li>
+            <li class="shot">
+              <img
+                src="./screens/screen-import.webp"
+                width="570"
+                height="1240"
+                loading="lazy"
+                decoding="async"
+                alt="Walky on an iPhone showing Apple Park: the ring campus in Cupertino, with the surrounding buildings imported from OpenStreetMap as coloured walls and a crowd of green pedestrians spread across the courtyard."
+              />
+              <p class="shot-caption">
+                Type <strong>One Apple Park Way, Cupertino</strong> — or any
+                address — and walk a crowd through it.
+              </p>
+            </li>
+          </ul>
+
+          <p class="band-note reveal">
+            The Swift model is checked against the TypeScript one bit for bit — the same crowd, the
+            same arithmetic, on both.
             <a
               class="link-arrow"
               href="https://github.com/pandermatt/walky-web"
               target="_blank"
               rel="noopener"
-              >Read how it works <span class="chev">›</span></a
+              >How that works <span class="chev">›</span></a
             >
           </p>
         </div>

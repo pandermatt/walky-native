@@ -52,6 +52,51 @@ the accent is Walky's `#FFC800` and its `shadowOf` shade rather than that site's
 indigo, for the reason the section below gives. Its hero is not a screenshot but
 the real model, stepped in the page; see `src/landing/heroScene.ts`.
 
+The three phones on it are real screenshots, taken from `ios/` running on an
+iPhone 17 Pro simulator and committed to `public/screens/` as WebP at 570×1240
+— twice the ~250px the row renders them at. Each one is a different capability
+rather than the same picture in three colours, which is what the row was the
+first time it was built:
+
+| File | Shows |
+|---|---|
+| `screen-draw.webp` | A drawn room and a painted crowd finding the gap, on the blueprint ground. |
+| `screen-measure.webp` | *Measure detour* over an imported Zürich HB: Walky's route at 276 m against Apple Maps' walking route at 522 m, 1.89×. |
+| `screen-import.webp` | Apple Park, imported from `One Apple Park Way, Cupertino` at 600 m across, with a crowd in the courtyard. |
+
+**The numbers in the middle shot are not readable at the size the row shows it.**
+The app draws those labels at 13pt on a 402pt screen, which lands at about 8px
+once a phone is a third of a 984px column — texture, not information. So the
+caption carries them in the page's own type, and the picture carries the two
+routes, which do read. Any future shot whose point is a number needs the same
+treatment or a bigger slot.
+
+Retaking one:
+
+```bash
+xcrun simctl status_bar <udid> override --time 9:41 --dataNetwork wifi \
+  --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 \
+  --batteryState charged --batteryLevel 100
+xcrun simctl io <udid> screenshot shot.png
+sips -Z 1240 shot.png --out shot-2x.png && cwebp -q 90 -sharp_yuv shot-2x.png -o out.webp
+```
+
+Three things that cost time to rediscover:
+
+- **The status-bar override is not optional.** Without it the shots carry
+  whatever time the machine had and the simulator's placeholder signal dots, and
+  three screenshots taken minutes apart disagree about both.
+- **The query field cannot be cleared from a script.** There is no key-event
+  action in the simulator tooling and the field has no clear button, so the way
+  to change the imported place is to relaunch the app — `MapImporter.query`
+  starts empty and is not persisted. The ground, accent and scale *are*
+  persisted; the sliders are not.
+- **Apple Park's ring is Apple's basemap, not an imported wall.** The import
+  brought back 23 buildings and 151 corners — the coloured blocks around the
+  courtyard — and the ring itself is drawn by the ground layer. The caption says
+  "walk a crowd through it" and not "the buildings become the walls" for that
+  reason.
+
 [pandermatt.ch]: https://pandermatt.ch/
 
 ## The look, and where it comes from
