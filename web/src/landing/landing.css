@@ -567,9 +567,9 @@ html[data-js] .reveal.is-visible {
     grid-template-columns: 1fr;
     gap: 40px;
   }
-  /* Stacked, the simulation goes first: it says what Walky is faster than the
-     paragraph does, and on a phone the paragraph is below the fold anyway. */
-  .hero-right { order: -1; }
+  /* Stacked, the name goes first and the simulation follows, in document order:
+     somebody arriving on a phone should read what Walky is before they are
+     shown a box of moving dots with no name on it. */
   .hero-stage { aspect-ratio: 16 / 11; }
 }
 
