@@ -1,5 +1,5 @@
 /**
- * The landing page: a theme toggle, a scroll reveal, one live simulation, and
+ * The landing page: a scroll reveal, one live simulation, and
  * one redirect that keeps every share link ever pasted anywhere working.
  *
  * None of the app is imported here beyond the model the hero runs -- no deck.gl,
@@ -33,46 +33,6 @@ if (forward) {
   // replace, not assign: the landing page should not sit in the back stack
   // between the link somebody clicked and the map it opens.
   location.replace(forward);
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   Theme
-   ───────────────────────────────────────────────────────────────────────────── */
-
-const THEME_KEY = 'walky-theme';
-
-/**
- * The toggle, wired to the class the inline script in <head> has already set.
- *
- * The head script owns the first paint -- it has to, or the page flashes light
- * before a stylesheet can say otherwise -- and this owns every change after it.
- * They agree because both write the same class and read the same key.
- *
- * A choice is remembered; the absence of one keeps following the system, which
- * is why nothing is written until somebody actually presses the button.
- */
-function installThemeToggle(): void {
-  const button = document.querySelector<HTMLButtonElement>('[data-theme-toggle]');
-  if (!button) return;
-
-  const sync = () => {
-    const dark = document.documentElement.classList.contains('dark');
-    button.setAttribute('aria-pressed', String(dark));
-    button.setAttribute('aria-label', dark ? 'Switch to the light theme' : 'Switch to the dark theme');
-  };
-
-  button.addEventListener('click', () => {
-    const dark = document.documentElement.classList.toggle('dark');
-    try {
-      localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
-    } catch {
-      // Private mode, or storage the browser has turned off. The theme still
-      // changes for this visit; it just will not be there on the next one.
-    }
-    sync();
-  });
-
-  sync();
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -240,7 +200,6 @@ function installHero(): void {
 /* ───────────────────────────────────────────────────────────────────────────── */
 
 if (!forward) {
-  installThemeToggle();
   installReveal();
   installHero();
 }

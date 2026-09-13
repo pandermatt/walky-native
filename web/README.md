@@ -3,8 +3,8 @@
 A pedestrian simulator that runs entirely in the browser. Draw walls, mark a goal,
 paint a crowd, and watch it find its way.
 
-This is a rewrite of [pandermatt/walky](https://github.com/pandermatt/walky), a
-2016 school project by **Pascal Andermatt** and **Jan Huber** — Java, Swing and
+This is a rewrite of `pandermatt/walky` (private), a
+2016 school project by **Pascal Andermatt** and **[Jan Huber](https://www.jan-huber.ch)** — Java, Swing and
 Maven, with Dijkstra over a visibility graph and OpenStreetMap building footprints
 as the environment. The original needed a JDK and Maven to run, so essentially
 nobody ever saw it. This version is a static page.
@@ -60,9 +60,20 @@ first time it was built:
 
 | File | Shows |
 |---|---|
-| `screen-draw.webp` | A drawn room and a painted crowd finding the gap, on the blueprint ground. |
-| `screen-measure.webp` | *Measure detour* over an imported Zürich HB: Walky's route at 276 m against Apple Maps' walking route at 522 m, 1.89×. |
-| `screen-import.webp` | Apple Park, imported from `One Apple Park Way, Cupertino` at 600 m across, with a crowd in the courtyard. |
+| `screen-draw.webp` | A drawn room and a painted crowd finding the goal, on the blueprint ground. |
+| `screen-measure.webp` | *Measure detour* over Zurich's old town, imported from `Rindermarkt, Zürich` at 380 m and **1:1**: Walky's route (orange) from Spitalgasse to Untere Zäune at 367 m, against 441 m on the pavements (blue), 1.20×. Taken at life size on purpose: at 1:10 the obstacle inflation seals every lane narrower than about 9 m, so in an old town Walky can only detour or find nothing, and the same two points measured 510 m against 449 m. |
+| `screen-import.webp` | Siena's Piazza del Campo, imported from `Piazza del Campo, Siena` at 380 m across and 1:10, with a crowd leaving the square for a goal to the north-west — away from the Palazzo Pubblico, which OpenStreetMap did not return as a building and a crowd would otherwise walk straight through. |
+
+Two rules for picking a place, both learned by getting them wrong the first
+time:
+
+- **No company's own campus.** The first import shot was Apple Park, which on a
+  page with an App Store button reads as a claim of association that does not
+  exist. Pick a public square.
+- **No route over rail tracks or water.** Imported walls are buildings and
+  nothing else, so the model will happily walk a crowd across a station's
+  platforms or a river. A picture of that is a picture of a limitation. Pick
+  ground where every open space is somewhere a person can actually walk.
 
 **The numbers in the middle shot are not readable at the size the row shows it.**
 The app draws those labels at 13pt on a 402pt screen, which lands at about 8px
@@ -81,7 +92,7 @@ xcrun simctl io <udid> screenshot shot.png
 sips -Z 1240 shot.png --out shot-2x.png && cwebp -q 90 -sharp_yuv shot-2x.png -o out.webp
 ```
 
-Three things that cost time to rediscover:
+Things that cost time to rediscover:
 
 - **The status-bar override is not optional.** Without it the shots carry
   whatever time the machine had and the simulator's placeholder signal dots, and
@@ -90,12 +101,12 @@ Three things that cost time to rediscover:
   action in the simulator tooling and the field has no clear button, so the way
   to change the imported place is to relaunch the app — `MapImporter.query`
   starts empty and is not persisted. The ground, accent and scale *are*
-  persisted; the sliders are not.
-- **Apple Park's ring is Apple's basemap, not an imported wall.** The import
-  brought back 23 buildings and 151 corners — the coloured blocks around the
-  courtyard — and the ring itself is drawn by the ground layer. The caption says
-  "walk a crowd through it" and not "the buildings become the walls" for that
-  reason.
+  persisted; the sliders are not. The simulator's text input is ASCII only, so
+  `Zürich` arrives as `Zrich` — which the geocoder forgives.
+- **Launch the app from the home screen.** Launched while another app is in
+  front, the status bar carries a back link to it that no override removes.
+- **Set the goal after painting the crowd, not before.** `setGoalAt` retargets
+  everybody already on the map; a crowd painted afterwards keeps random colours.
 
 [pandermatt.ch]: https://pandermatt.ch/
 
