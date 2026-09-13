@@ -257,10 +257,14 @@ enum MapRenderer {
     guard a.count > 0 else { return }
     let r = world.settings.pedestrianRadius
 
+    // Somebody who has given up goes white until it walks again. Read off the
+    // retreat rather than painted into the colour, as `app.ts` does: the goal's
+    // colour has to come back when it tries again.
+    let white = packRgb((255, 255, 255))
     var byColor: [UInt32: Path] = [:]
     for i in 0..<a.count {
       let x = Double(a.x[i]), y = Double(a.y[i])
-      byColor[a.color[i], default: Path()].addEllipse(
+      byColor[a.fleeLeft[i] > 0 ? white : a.color[i], default: Path()].addEllipse(
         in: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
     }
     // The white ring every pedestrian wears, from PedestrianPanel.drawPedestrian.

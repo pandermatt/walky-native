@@ -157,6 +157,45 @@ private func stuckWobble(_ x: Double, _ y: Double, _ stalled: Double, _ salt: Do
 private let CARRY_FROM: Double = 2.5
 private let CARRY_WANDER: Double = 0.5
 
+/// Giving up: somebody squeezed long enough backs out to somewhere with room,
+/// waits, and tries again. What turns a permanent arch at a bottleneck into one
+/// that sheds a few people off the back and clears.
+///
+/// Every figure here was measured, and why is in behaviour.ts. `SURRENDER_FROM`
+/// is `CARRY_FROM` because the load at which the crowd is moving you is the
+/// honest definition of being squeezed.
+public let SURRENDER_FROM: Double = CARRY_FROM
+private let SURRENDER_STEPS: Double = 25
+public let RELIEF: Double = 1
+/// The walk out and the wait at the far end together: standing on the refuge
+/// beats every other option on cost alone, so the wait needs no code.
+public let FLEE_STEPS: Double = 240
+private let NERVE_RESOLVE: Double = 1.0
+
+/// Ticks of being squeezed this pedestrian will take before it gives up.
+public func surrenderSteps(_ assertiveness: Double) -> Double {
+  SURRENDER_STEPS * (1 - NERVE_RESOLVE / 2 + NERVE_RESOLVE * assertiveness)
+}
+
+/// The window "no people" is judged in, and how far a retreat may go -- both in
+/// radii. Stepping aside, not crossing the map: a long retreat is swum against
+/// the whole crowd and never arrives.
+public let REFUGE_ROOM: Double = 5
+private let REFUGE_REACH: Double = 10
+/// The ground behind, sampled as a fan of directions at several distances.
+/// Sampled rather than taken from the visibility graph, whose nodes at a gap are
+/// the corners of the jam itself.
+private let REFUGE_ARCS = 13
+private let REFUGE_RANGES = 5
+private let REFUGE_ARC: Double = 0.7
+/// Room is a bar; between places that clear it, ground gained on the goal wins.
+private let W_REFUGE_CROWD: Double = 1.0
+private let W_REFUGE_WALK: Double = 0.5
+/// How much emptier than here a refuge has to be. Relative, because an absolute
+/// bar means deserted and rusts the valve shut on any map worth simulating.
+private let REFUGE_RELIEF: Double = 0.5
+private let REFUGE_CAP: Double = 3
+
 /// How much of its own weight a pedestrian can still put behind a lean.
 private func gripOf(_ a: Agents, _ j: Int) -> Double {
   let p = Double(a.pressure[j])
@@ -704,6 +743,85 @@ public final class Behaviour {
     }
     }
     return best
+  }
+
+  /// Where to go when you have given up: the nearest place behind with room in
+  /// it, and in sight, so it can get there without a plan.
+  ///
+  /// Nil when there is nowhere worth going, and the caller then does not let it
+  /// give up: giving up with nowhere to go would stand it still, in the crush,
+  /// for the length of a retreat.
+  public func chooseRefuge(_ i: Int, _ radius: Double) -> Point? {
+    let a = agents
+    let here = Point(Double(a.x[i]), Double(a.y[i]))
+    let room = REFUGE_ROOM * radius
+    let reach = REFUGE_REACH * radius
+
+    // Which way the goal is: up its route if it holds one, else the way it has
+    // been walking, and failing both against the way the crowd is leaning.
+    var gx = a.hasWaypoint[i] != 0 ? Double(a.waypointX[i]) - Double(a.x[i]) : Double(a.headingX[i])
+    var gy = a.hasWaypoint[i] != 0 ? Double(a.waypointY[i]) - Double(a.y[i]) : Double(a.headingY[i])
+    var len = jsHypot(gx, gy)
+    if len < 1e-6 { gx = -Double(a.pushX[i]); gy = -Double(a.pushY[i]); len = jsHypot(gx, gy) }
+    if len < 1e-6 { return nil }
+    gx /= len
+    gy /= len
+
+    // Where the goal actually is, for measuring ground gained on it.
+    let goal = nav.goalAnchor(Int(a.goal[i]), here)
+      ?? Point(here.x + gx * reach, here.y + gy * reach)
+    let goalHere = jsHypot(here.x - goal.x, here.y - goal.y)
+    let hereCrowd = crowdAt(here, room, i)
+
+    var best: Point?
+    var bestScore = Double.infinity
+    let spread = (Double.pi * REFUGE_ARC) / Double(REFUGE_ARCS - 1)
+    for k in 0..<REFUGE_ARCS {
+      let turn = Double(k - (REFUGE_ARCS - 1) / 2) * spread
+      let cos = jsCos(turn)
+      let sin = jsSin(turn)
+      let dx = -(gx * cos - gy * sin)
+      let dy = -(gx * sin + gy * cos)
+      for r in 1...REFUGE_RANGES {
+        let walk = reach * Double(r) / Double(REFUGE_RANGES)
+        let p = Point(jsRound(here.x + dx * walk), jsRound(here.y + dy * walk))
+        if insideAnyWallAnywhere(p) { continue }
+        if !nav.canSee(here, p) { continue }
+        let crowd = crowdAt(p, room, i)
+        if crowd > hereCrowd * REFUGE_RELIEF || crowd > REFUGE_CAP { continue }
+        let gained = (jsHypot(p.x - goal.x, p.y - goal.y) - goalHere) / reach
+        let score = W_REFUGE_CROWD * crowd - W_REFUGE_WALK * gained
+        if score < bestScore { bestScore = score; best = p }
+      }
+    }
+    return best
+  }
+
+  /// How many pedestrians still walking are within `room` of a point.
+  private func crowdAt(_ p: Point, _ room: Double, _ selfIndex: Int) -> Double {
+    let a = agents
+    let n = hash.query(p.x, p.y, room, selfIndex, a.x, a.y)
+    var count: Double = 0
+    for k in 0..<n where a.arrived[Int(hash.results[k])] == 0 { count += 1 }
+    return count
+  }
+
+  /// `insideAnyWall` for a point no substep primed. A refuge probe reaches ten
+  /// radii out, far past the box `primeNearby` covers, so it asks the index
+  /// itself -- the same superset-then-exact test, so the same answer TypeScript
+  /// gets from scanning every obstacle.
+  private func insideAnyWallAnywhere(_ p: Point) -> Bool {
+    let index = nav.blockerIndex
+    let n = index.query(p)
+    for k in 0..<n {
+      for ob in nav.blockerGroups[Int(index.results[k])].parts {
+        if p.x < ob.bbox.minX || p.x > ob.bbox.maxX
+          || p.y < ob.bbox.minY || p.y > ob.bbox.maxY { continue }
+        if !inShell(p, ob.wallId) { continue }
+        if pointInPolygon(ob.hull, p) { return true }
+      }
+    }
+    return false
   }
 
   /// What a pedestrian does when it has no route at all: jiggle until it finds

@@ -47,6 +47,17 @@ public final class Agents {
   public var effectiveSpace: [Float]
   /// Remaining distance to the goal; lower means higher priority in a crowd.
   public var costToGoal: [Float]
+  /// How long this one has been squeezed, in ticks: up while the crowd presses
+  /// hard enough to move it, down when it lets up. Pressure rather than patience,
+  /// because a polite queue runs patience out and what earns giving up is being
+  /// crushed, not delayed.
+  public var crush: [Float]
+  /// Ticks of retreat left, and the whole definition of having given up: above
+  /// nought this pedestrian is walking away from its goal rather than towards it.
+  public var fleeLeft: [Float]
+  /// Where it is retreating to; meaningless unless `fleeLeft` is above nought.
+  public var refugeX: [Float]
+  public var refugeY: [Float]
   public var selected: [UInt8]
   /// Came out of a generator, so is taken off the map the moment it arrives.
   public var spawned: [UInt8]
@@ -55,6 +66,9 @@ public final class Agents {
   public internal(set) var justArrived: [Int] = []
   /// Involuntary steps taken this tick -- pedestrians the crowd moved.
   public var carries = 0
+  /// Pedestrians that have given up since the crowd was made: "nobody gives up
+  /// in a crowd with room to walk in" is not otherwise checkable.
+  public var surrenders = 0
   public internal(set) var count = 0
   internal var capacity: Int
 
@@ -85,6 +99,10 @@ public final class Agents {
     party = [Int32](repeating: 0, count: capacity)
     effectiveSpace = [Float](repeating: 0, count: capacity)
     costToGoal = [Float](repeating: .infinity, count: capacity)
+    crush = [Float](repeating: 0, count: capacity)
+    fleeLeft = [Float](repeating: 0, count: capacity)
+    refugeX = [Float](repeating: 0, count: capacity)
+    refugeY = [Float](repeating: 0, count: capacity)
     selected = [UInt8](repeating: 0, count: capacity)
     spawned = [UInt8](repeating: 0, count: capacity)
   }
@@ -117,6 +135,9 @@ public final class Agents {
     party[i] = Int32(partyOf(at.x, at.y))
     effectiveSpace[i] = 0
     costToGoal[i] = .infinity
+    crush[i] = 0
+    fleeLeft[i] = 0
+    refugeX[i] = 0; refugeY[i] = 0
     selected[i] = 0
     spawned[i] = 0
     return i
@@ -193,6 +214,9 @@ public final class Agents {
     party[i] = party[last]
     effectiveSpace[i] = effectiveSpace[last]
     costToGoal[i] = costToGoal[last]
+    crush[i] = crush[last]
+    fleeLeft[i] = fleeLeft[last]
+    refugeX[i] = refugeX[last]; refugeY[i] = refugeY[last]
     selected[i] = selected[last]
     spawned[i] = spawned[last]
   }
@@ -226,12 +250,42 @@ public final class Agents {
       // get closer" rather than "did it move" -- which a pedestrian shuffling on
       // the spot answers yes to.
       let costBefore = Double(costToGoal[i])
+      // The same reading for a retreat, taken before the surrender below can
+      // move the refuge.
+      let refugeBefore = jsHypot(Double(refugeX[i]) - Double(x[i]),
+                                 Double(refugeY[i]) - Double(y[i]))
+
+      // Whether it is still trying. Pressure is last tick's figure, the same
+      // deal density takes: a crowd does not reorganise itself inside one tick.
+      if fleeLeft[i] > 0 {
+        fleeLeft[i] = Float(Double(fleeLeft[i]) - 1)
+        if fleeLeft[i] <= 0 { resume(i) }
+      } else {
+        crush[i] = Double(pressure[i]) >= SURRENDER_FROM
+          ? Float(Double(crush[i]) + 1)
+          : Float(jsMax(0, Double(crush[i]) - RELIEF))
+        if Double(crush[i]) >= surrenderSteps(Double(assertiveness[i])) {
+          // Nowhere to go is not a reason to stand still in a crush: with no
+          // refuge it keeps walking and keeps its counter, and asks again.
+          if let refuge = behaviour.chooseRefuge(i, radius) { surrender(i, refuge) }
+        }
+      }
 
       let own = speed * paceScale(Double(trait[i])) * crowdPace(Double(density[i]))
 
       var left = own
       var stepTaken = true
       while left > 1e-6 && stepTaken {
+        if fleeLeft[i] > 0 {
+          // Backing out of a crush. The refuge is a place, not a route: no
+          // waypoint, no corner to cut, nothing to arrive at.
+          let away = Point(Double(refugeX[i]), Double(refugeY[i]))
+          let out = behaviour.stepTowards(i, away, radius, personalSpace, jsMin(SQRT2, left))
+          stepTaken = out.length > 0
+          left -= stepTaken ? out.length : left
+          continue
+        }
+
         if hasWaypoint[i] == 0 {
           guard let next = nav.nextWaypoint(Point(Double(x[i]), Double(y[i])), goalId) else {
             // No route: jiggle. Either it is embedded in a wall's expanded hull
@@ -281,17 +335,47 @@ public final class Agents {
       // wants progress made, and a shuffle on the spot is none.
       stepDist[i] = Float(jsHypot(Double(x[i]) - here.x, Double(y[i]) - here.y))
 
-      let gained = costBefore - Double(costToGoal[i])
-      if gained > STALL_PROGRESS { stalled[i] = Float(jsMax(0, Double(stalled[i]) - 2)) }
+      // Getting nowhere, judged against wherever this one is trying to get to:
+      // the goal for most, the refuge for somebody retreating -- whose
+      // `costToGoal` cannot move, since a retreat fetches no waypoint. Standing
+      // on the refuge is not stalling either; the wait there is the point.
+      let toRefuge = jsHypot(Double(refugeX[i]) - Double(x[i]), Double(refugeY[i]) - Double(y[i]))
+      let stalling = fleeLeft[i] > 0 ? refugeBefore - toRefuge : costBefore - Double(costToGoal[i])
+      let resting = fleeLeft[i] > 0 && toRefuge <= radius
+      if stalling > STALL_PROGRESS || resting { stalled[i] = Float(jsMax(0, Double(stalled[i]) - 2)) }
       else { stalled[i] = Float(Double(stalled[i]) + 1) }
     }
   }
 
   internal func clearJustArrived() { justArrived.removeAll(keepingCapacity: true) }
 
+  /// The one place an agent gives up. Nothing here grants it right of way:
+  /// desperation already does, since somebody about to give up has been getting
+  /// nowhere, and the stall keeps counting for the whole retreat.
+  private func surrender(_ i: Int, _ refuge: Point) {
+    refugeX[i] = Float(refuge.x)
+    refugeY[i] = Float(refuge.y)
+    fleeLeft[i] = Float(FLEE_STEPS)
+    hasWaypoint[i] = 0
+    surrenders += 1
+  }
+
+  /// Walking to its goal again. Clearing the crush is what makes this a retry
+  /// rather than a loop: it has to be squeezed all over again to give up twice.
+  private func resume(_ i: Int) {
+    fleeLeft[i] = 0
+    crush[i] = 0
+    hasWaypoint[i] = 0
+  }
+
   /// The one place an agent becomes arrived, so nothing watching it is missed.
   private func markArrived(_ i: Int) {
     arrived[i] = 1
+    // Any retreat is over. Arriving mid-retreat is possible, and the step loop
+    // skips whoever has arrived, so nothing else would wind the counter down --
+    // and the render reads it, so this one would finish white instead of black.
+    fleeLeft[i] = 0
+    crush[i] = 0
     color[i] = packRgb(BLACK)   // matches IntelligentPedestrian:113
     justArrived.append(i)
   }
@@ -316,6 +400,7 @@ public final class Agents {
     growF(&pushX); growF(&pushY); growF(&density); growF(&stepDist)
     growF(&trait); growF(&assertiveness); growI(&party)
     growF(&effectiveSpace); growF(&costToGoal, .infinity)
+    growF(&crush); growF(&fleeLeft); growF(&refugeX); growF(&refugeY)
     growU8(&selected); growU8(&spawned)
     capacity = next
   }
@@ -443,6 +528,10 @@ extension Agents {
       arrived[i] = 0
       hasWaypoint[i] = 0
       costToGoal[i] = .infinity
+      // A retreat is from somewhere to somewhere. With the goal gone there is
+      // nothing to have given up on, and leaving it fleeing would leave it white.
+      crush[i] = 0
+      fleeLeft[i] = 0
     }
   }
 
@@ -502,7 +591,9 @@ extension Agents {
       spawned[i] = snap.spawned[i]
     }
     // Derived state, cleared rather than restored: a waypoint belongs to a map
-    // that may no longer exist, and a stale one would be walked to.
+    // that may no longer exist, and a stale one would be walked to. A retreat
+    // too -- restored mid-retreat, a pedestrian would come back white, walking
+    // away from a goal it no longer remembers giving up on.
     for i in 0..<n {
       hasWaypoint[i] = 0
       waypointNode[i] = -1
@@ -514,6 +605,8 @@ extension Agents {
       density[i] = 0
       stepDist[i] = 0
       effectiveSpace[i] = 0
+      crush[i] = 0
+      fleeLeft[i] = 0
       costToGoal[i] = .infinity
     }
     // Not derived from the tick but from the pedestrian: recomputed rather than
@@ -526,6 +619,7 @@ extension Agents {
     }
     clearJustArrived()
     carries = 0
+    surrenders = 0
     count = n
   }
 
@@ -555,6 +649,9 @@ extension Agents {
       density[i] = 0
       stepDist[i] = 0
       effectiveSpace[i] = 0
+      crush[i] = 0
+      fleeLeft[i] = 0
     }
+    surrenders = 0
   }
 }

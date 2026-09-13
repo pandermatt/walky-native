@@ -313,6 +313,25 @@ public final class Navigation {
     return rest.isEmpty ? [from, next.point] : [from] + rest
   }
 
+  /// The nearest point on a goal's hull to `from`, or nil when there is no such
+  /// goal: where the goal *is*, for anything that measures against it rather
+  /// than routing to it.
+  public func goalAnchor(_ goalWallId: Int, _ from: Point) -> Point? {
+    var best: Point?
+    var bestDist = Double.infinity
+    for part in graph.blockers.obstacles {
+      if part.wallId != goalWallId { continue }
+      let hull = part.hull
+      let n = hull.count
+      for i in 0..<n {
+        let p = closestPointOnSegment(hull[i], hull[(i + 1) % n], from)
+        let d = distance(p, from)
+        if d < bestDist { bestDist = d; best = p }
+      }
+    }
+    return best
+  }
+
   /// True when the agent is close enough to its goal hull to stop.
   public func hasArrived(_ from: Point, _ goalWallId: Int, _ tolerance: Double) -> Bool {
     for part in graph.blockers.obstacles {
