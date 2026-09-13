@@ -159,41 +159,6 @@
   :root { --page-margin: 20px; }
 }
 
-/* Dark palette. Defined ONLY here and on :root — never also under
-   @media (prefers-color-scheme: dark). The inline script in index.html has
-   already resolved the system preference into this class, and two sources would
-   disagree the moment somebody uses the toggle. */
-:root.dark {
-  /* The fill does not move: it is the app's colour, and the app's colour does
-     not have a light and a dark version. Only the ink adapts -- on #1E1E1E the
-     orange is already the legible choice, at 10.7:1, so the ink IS the fill. */
-  --c-accent-ink: 255, 200, 0;
-  --c-accent-hover: 255, 214, 61;
-
-  /* A bright fill on a dark ground clears 3:1 on its own; the edge that carries
-     it on white would only muddy it. */
-  --c-fill-edge: 255, 255, 255, 0;
-
-  --c-text-1: 255, 255, 255;
-  --c-text-2: 152, 152, 157;
-  --c-text-3: 122, 122, 127;
-
-  /* #1E1E1E, not the site's #161617. It is Walky's ground, derived rather than
-     picked -- Color.DARK_GRAY.darker().darker() -- and using it here means
-     stepping from the landing page into the demo is one continuous surface
-     rather than two dark greys that nearly match. */
-  --c-bg: 30, 30, 30;
-  --c-bg-soft: 38, 38, 38;
-
-  --c-divider: 62, 62, 62;
-
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.5);
-  --shadow-photo: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
-
-  color-scheme: dark;
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    2. FONT
    The @font-face is NOT here. It is in the <head> of index.html, for the same
@@ -397,9 +362,8 @@ strong { font-weight: 600; font-variation-settings: 'wght' 600; color: rgba(var(
 .link-arrow .chev { font-size: 1.1em; line-height: 1; transition: transform 0.25s ease; }
 .link-arrow:hover .chev { transform: translateX(2px); }
 
-/* On the black band the light-theme ink (#7C6200) measures 3.6:1, which is a
-   border and not a link. The band is black in BOTH themes, so it cannot wait
-   for the theme to move to meet it -- it takes the fill, at 13.5:1. */
+/* On the black band the page's ink (#7C6200) measures 3.6:1, which is a border
+   and not a link, so a link there takes the fill instead, at 13.5:1. */
 .section--dark .link-arrow { color: rgba(var(--c-accent), 1); }
 
 /* An inline link inside running text: underlined, so it is not colour alone. */
@@ -485,92 +449,6 @@ html[data-js] .reveal.is-visible {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   9. HEADER
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-.site-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-s);
-  min-height: 60px;
-  padding-block: var(--space-xs);
-  background: rgba(var(--c-bg), 0.82);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid rgba(var(--c-divider), 0.5);
-}
-
-/* Where the filter is unsupported the bar goes fully opaque instead: a custom
-   property cannot carry a fallback, and a translucent bar with no blur behind
-   it is text over a moving crowd. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .site-header { background: rgba(var(--c-bg), 1); }
-}
-
-.wordmark {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 1.2rem;
-  font-weight: 700;
-  font-variation-settings: 'wght' 700;
-  letter-spacing: -0.02em;
-}
-
-/* The mark is the app's own: a pedestrian is a filled dot in its goal's colour
-   inside a white ring, which is what PedestrianPanel.drawPedestrian has drawn
-   since 2016. Three of them, the way the sticker drawer icon is three. */
-.wordmark-dots { display: flex; gap: 3px; }
-.wordmark-dot {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.92);
-}
-
-.nav { display: flex; align-items: center; gap: var(--space-xs); }
-
-.nav-link {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  font-variation-settings: 'wght' 500;
-  color: rgba(var(--c-text-2), 1);
-  padding: 6px 8px;
-  border-radius: var(--radius-pill);
-  transition: color var(--transition);
-}
-.nav-link:hover { color: rgba(var(--c-text-1), 1); }
-
-@media (max-width: 560px) {
-  .nav-link--wide { display: none; }
-}
-
-.theme-toggle {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  color: rgba(var(--c-text-2), 1);
-  transition: background-color var(--transition), color var(--transition);
-}
-.theme-toggle:hover {
-  background: rgba(var(--c-text-1), 0.06);
-  color: rgba(var(--c-text-1), 1);
-}
-/* One button, two glyphs: the moon while the page is light, the sun while it is
-   dark -- the icon for the theme the press would give you, which is the same
-   thing the button's aria-label says. Showing the theme already in force would
-   leave the picture and the label contradicting each other. */
-.theme-toggle .icon-sun { display: none; }
-:root.dark .theme-toggle .icon-sun { display: block; }
-:root.dark .theme-toggle .icon-moon { display: none; }
-
-/* ═══════════════════════════════════════════════════════════════════════════
    10. HERO
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -633,11 +511,6 @@ html[data-js] .reveal.is-visible {
 .button.is-pending:hover { background: rgba(var(--c-accent), 0.5); }
 .button.is-pending:active { transform: none; }
 
-:root.dark .button.is-pending {
-  background: rgba(var(--c-accent), 0.28);
-  color: rgba(var(--c-accent), 1);
-}
-
 .store-pill {
   margin-left: 2px;
   padding: 3px 9px;
@@ -649,12 +522,18 @@ html[data-js] .reveal.is-visible {
   letter-spacing: var(--ls-xs);
   text-transform: uppercase;
 }
-:root.dark .store-pill { background: rgba(var(--c-accent), 0.18); }
 
-/* The web version, deliberately the smaller of the two. */
+/* The browser and the repo, deliberately smaller than the App Store button.
+   Each carries a glyph -- a globe and the GitHub mark -- in the text's colour,
+   so the hover that recolours the label recolours the icon with it. */
 .button--web {
   padding: 10px 18px;
   font-size: var(--fs-sm);
+}
+.button--web .button-icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
 }
 
 /* ── The live simulation ─────────────────────────────────────────────────── */
@@ -670,11 +549,6 @@ html[data-js] .reveal.is-visible {
   box-shadow: var(--shadow-photo);
   aspect-ratio: 4 / 3;
 }
-
-/* In dark the card and the page are the same #1E1E1E by design, which is one
-   continuous surface and also no edge at all. The hairline is what keeps it a
-   frame; in light the shadow already does that job. */
-:root.dark .hero-stage { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); }
 
 .hero-canvas { width: 100%; height: 100%; }
 
