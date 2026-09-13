@@ -9,7 +9,10 @@
  *
  * The two placeholders are replaced by the pwa() Vite plugin.
  */
-export {};
+
+// The same module the build reads its precache list from, so which shell answers
+// a navigation is decided in one place rather than restated here.
+import { shellForUrl } from '../build/precache';
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
@@ -85,7 +88,7 @@ sw.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   if (new URL(request.url).origin !== sw.location.origin) return;
 
-  // A navigation to any path inside the scope is the app: there is one page.
+  // A navigation inside the scope is one of the two pages; shellFor says which.
   if (request.mode === 'navigate') {
     event.respondWith(serveShell(request));
     return;
@@ -93,9 +96,18 @@ sw.addEventListener('fetch', (event) => {
   event.respondWith(serveAsset(request));
 });
 
+/**
+ * The shell for a navigation, chosen by path rather than assumed.
+ *
+ * Which one is shellForUrl's answer, tested in the suite rather than on a
+ * deploy. A request from outside the scope falls through to the landing shell,
+ * which is the right answer for the only such requests that get this far: the
+ * fetch handler has already turned away anything cross-origin, and anything
+ * else under this origin is a page we do not serve.
+ */
 async function serveShell(request: Request): Promise<Response> {
   const cache = await caches.open(CACHE);
-  const shell = await cache.match(new URL('index.html', BASE));
+  const shell = await cache.match(new URL(shellForUrl(request.url, BASE), BASE));
   if (shell) return shell;
   // Before the first install finishes there is nothing to serve but the
   // network, and its answer reaches the page through us -- so it has to be as

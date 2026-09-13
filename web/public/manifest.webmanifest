@@ -3,7 +3,7 @@
   "short_name": "Walky",
   "description": "Draw walls, mark a goal, paint a crowd, and watch it find its way. Runs entirely in the browser.",
   "id": "./",
-  "start_url": "./",
+  "start_url": "./demo/",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

@@ -15,6 +15,90 @@ on. The one place it knowingly departs is how a pedestrian picks its next step,
 which the original wired to the preferred-space setting in a way that made the
 setting counterproductive — see [Crowd behaviour](#crowd-behaviour).
 
+## Two pages
+
+| | |
+|---|---|
+| `/` | The landing page. `index.html` and `src/landing/`. |
+| `/demo/` | The app. `demo/index.html` and everything else in `src/`. |
+
+The app was the root page until the landing page arrived, and it moved rather
+than the landing page taking a path of its own: a search result, a share link
+and an App Store listing all point at walky.ch, and what should answer there is
+the page that says what Walky is.
+
+Three things follow from the move, and each is a place the app used to be able
+to assume it was the only page:
+
+- **Assets are resolved against the deployment root, not the document.**
+  `src/assetUrl.ts` is the one place that knows the app's page sits a directory
+  below the root; the toolbar icons, the typeface and the service worker
+  registration all go through it. Written from the root instead — `/icons/…` —
+  they would agree with walky.ch and break under a subpath, which is the whole
+  reason `base` is `'./'`.
+- **The worker serves two shells.** `shellFor` in `build/precache.ts` decides
+  which, and `shellForUrl` does the reduction that makes it right under a
+  subpath. Both are unit-tested, because getting it wrong offline means the app
+  opening to a brochure — or a shared map opening to an empty canvas.
+- **Links made before the move still work.** Every Walky link pasted anywhere
+  before today is `walky.ch/#m=…` and now arrives at a page that reads no
+  fragment. `src/landing/forward.ts` forwards those into the app with the
+  payload intact. Links made since need nothing: `shareUrl` builds from
+  `location.href`.
+
+The landing page's own look is ported from [pandermatt.ch]'s `global.css` — the
+token system, the type scale, the spacing, the controls — with one substitution:
+the accent is Walky's `#FFC800` and its `shadowOf` shade rather than that site's
+indigo, for the reason the section below gives. Its hero is not a screenshot but
+the real model, stepped in the page; see `src/landing/heroScene.ts`.
+
+The three phones on it are real screenshots, taken from `ios/` running on an
+iPhone 17 Pro simulator and committed to `public/screens/` as WebP at 570×1240
+— twice the ~250px the row renders them at. Each one is a different capability
+rather than the same picture in three colours, which is what the row was the
+first time it was built:
+
+| File | Shows |
+|---|---|
+| `screen-draw.webp` | A drawn room and a painted crowd finding the gap, on the blueprint ground. |
+| `screen-measure.webp` | *Measure detour* over an imported Zürich HB: Walky's route at 276 m against Apple Maps' walking route at 522 m, 1.89×. |
+| `screen-import.webp` | Apple Park, imported from `One Apple Park Way, Cupertino` at 600 m across, with a crowd in the courtyard. |
+
+**The numbers in the middle shot are not readable at the size the row shows it.**
+The app draws those labels at 13pt on a 402pt screen, which lands at about 8px
+once a phone is a third of a 984px column — texture, not information. So the
+caption carries them in the page's own type, and the picture carries the two
+routes, which do read. Any future shot whose point is a number needs the same
+treatment or a bigger slot.
+
+Retaking one:
+
+```bash
+xcrun simctl status_bar <udid> override --time 9:41 --dataNetwork wifi \
+  --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 \
+  --batteryState charged --batteryLevel 100
+xcrun simctl io <udid> screenshot shot.png
+sips -Z 1240 shot.png --out shot-2x.png && cwebp -q 90 -sharp_yuv shot-2x.png -o out.webp
+```
+
+Three things that cost time to rediscover:
+
+- **The status-bar override is not optional.** Without it the shots carry
+  whatever time the machine had and the simulator's placeholder signal dots, and
+  three screenshots taken minutes apart disagree about both.
+- **The query field cannot be cleared from a script.** There is no key-event
+  action in the simulator tooling and the field has no clear button, so the way
+  to change the imported place is to relaunch the app — `MapImporter.query`
+  starts empty and is not persisted. The ground, accent and scale *are*
+  persisted; the sliders are not.
+- **Apple Park's ring is Apple's basemap, not an imported wall.** The import
+  brought back 23 buildings and 151 corners — the coloured blocks around the
+  courtyard — and the ring itself is drawn by the ground layer. The caption says
+  "walk a crowd through it" and not "the buildings become the walls" for that
+  reason.
+
+[pandermatt.ch]: https://pandermatt.ch/
+
 ## The look, and where it comes from
 
 | Element | Rule | Original |
@@ -735,6 +819,15 @@ copied from `public/`, drops the worker itself, and substitutes both the list an
 a hash of its contents into `src/sw.ts`. That hash names the cache, so a new
 build lands in a new cache and the previous one is deleted on activation.
 
+There are two pages under one worker, and one worker is the point: it is
+registered from the root — `src/assetUrl.ts` again — so its scope is the whole
+origin rather than `/demo/`, and a navigation to either page is answered from
+the same snapshot. Which shell answers is `shellFor`'s decision, and the
+manifest's `start_url` is `./demo/` so that installing gives the app and not the
+page describing it. Its `id` deliberately stays `./`: `id` is the installed
+app's identity, and moving it would orphan every home screen Walky is already
+on.
+
 Updating is offered, never imposed. The map you have drawn lives in memory and
 nowhere else, so a worker that reloaded the page to apply an update would throw
 away the crowd you were watching. The new worker takes over for the *next* load
@@ -748,7 +841,7 @@ edited.
 Two things the manifest does not cover:
 
 - **iOS reads almost none of it.** The home-screen icon, the app name and
-  standalone display each need their own tag in `index.html`.
+  standalone display each need their own tag in `demo/index.html`.
 - **The status bar is not somewhere to draw.** `viewport-fit=cover`, and
   equally the translucent status-bar style, put the page *underneath* iOS's
   status bar — which then frosts whatever sits below it, and the top of the map
@@ -1087,7 +1180,10 @@ npm run preview
 ```
 
 The service worker only exists in a build, so `npm run preview` is where to check
-the offline behaviour: load the page once, then kill the network and reload.
+the offline behaviour: load the page once, then kill the network and reload. Do
+it for both `/` and `/demo/` — they are separate shells, and only the app
+registers the worker, so the landing page goes offline the first time somebody
+opens the demo.
 
 ```bash
 npm test

@@ -11,10 +11,22 @@
 /sw.js
   Cache-Control: no-cache
 
+# Both shells. The bundle they pull in is content-hashed and immutable above;
+# the HTML that names it is the one file that must never be served stale, or a
+# deploy reaches nobody who has been here before.
 /
   Cache-Control: no-cache
 
 /index.html
+  Cache-Control: no-cache
+
+/demo
+  Cache-Control: no-cache
+
+/demo/
+  Cache-Control: no-cache
+
+/demo/index.html
   Cache-Control: no-cache
 
 /manifest.webmanifest
@@ -26,6 +38,12 @@
   Cache-Control: public, max-age=31536000, immutable
 
 /icons/*
+  Cache-Control: public, max-age=604800
+
+# The landing page's App Store screenshots. Replaced when the app changes, not
+# when the site is rebuilt, so they get the icons' week rather than the bundle's
+# year -- long enough that a second visit does not refetch them.
+/screens/*
   Cache-Control: public, max-age=604800
 
 /images/*

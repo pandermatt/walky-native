@@ -1,3 +1,4 @@
+import { asset } from './assetUrl';
 import { TOUCH } from './ui/appShell';
 import { injectStyle, installTheme } from './ui/theme';
 
@@ -166,7 +167,16 @@ export function registerServiceWorker(stage: HTMLElement): void {
   });
 
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('./sw.js').catch((err: unknown) => {
+    /*
+     * The root's sw.js, not this page's.
+     *
+     * A worker's scope is the directory it is served from, so registering
+     * `./sw.js` from the app at /demo/ would ask for a file that is not there
+     * -- and, if it were, would give a worker that could never answer a
+     * navigation to the landing page at /. One worker owns the origin, and it
+     * lives where it always has.
+     */
+    void navigator.serviceWorker.register(asset('sw.js')).catch((err: unknown) => {
       // Offline support is an enhancement; the app itself is already running.
       console.warn('Walky: offline support unavailable', err);
     });
