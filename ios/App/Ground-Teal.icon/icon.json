@@ -6,9 +6,17 @@
     {
       "layers": [
         {
-          "image-name": "stripes.png",
-          "name": "stripes",
-          "is-glass": true
+          "image-name": "walker.png",
+          "name": "walker",
+          "is-glass": true,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.16078,0.83922,0.65882,1.00000"
+              }
+            }
+          ]
         }
       ],
       "shadow": {
@@ -23,9 +31,17 @@
     {
       "layers": [
         {
-          "image-name": "walker.png",
-          "name": "walker",
-          "is-glass": true
+          "image-name": "stripes.png",
+          "name": "stripes",
+          "is-glass": true,
+          "fill-specializations": [
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.16078,0.83922,0.65882,1.00000"
+              }
+            }
+          ]
         }
       ],
       "shadow": {

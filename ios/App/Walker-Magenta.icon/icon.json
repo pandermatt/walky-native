@@ -6,8 +6,8 @@
     {
       "layers": [
         {
-          "image-name": "stripes.png",
-          "name": "stripes",
+          "image-name": "walker.png",
+          "name": "walker",
           "is-glass": true
         }
       ],
@@ -23,8 +23,8 @@
     {
       "layers": [
         {
-          "image-name": "walker.png",
-          "name": "walker",
+          "image-name": "stripes.png",
+          "name": "stripes",
           "is-glass": true
         }
       ],

@@ -356,9 +356,30 @@ func crossingSVG(dots: [RGB], ink: RGB, on band: Box) -> String {
 /// components 0-1, one group per layer, `is-glass` on each.
 func iconJSON(_ paint: IconPaint, layers: [(file: String, translucent: Bool)]) -> String {
   func component(_ v: Int) -> String { String(format: "%.5f", Double(v) / 255) }
-  let fill = "extended-srgb:"
-    + [paint.ground.r, paint.ground.g, paint.ground.b].map(component).joined(separator: ",")
-    + ",1.00000"
+  func colour(_ c: RGB) -> String {
+    "extended-srgb:" + [c.r, c.g, c.b].map(component).joined(separator: ",") + ",1.00000"
+  }
+  let fill = colour(paint.ground)
+
+  // The dark rendition drops the fill for the system's own near-black tile and
+  // keeps the layers as they are, so a dark ink goes dark-on-dark and the
+  // figure all but vanishes. Where that happens the layers are repainted for
+  // the dark appearance only -- in the ground's colour, which is the other half
+  // of the same pair, so Orange stays orange with the dark ink it no longer has
+  // a use for left out.
+  let dark = paint.darkInk.map { ink in
+    """
+    ,
+              "fill-specializations": [
+                {
+                  "appearance": "dark",
+                  "value": {
+                    "solid": "\(colour(ink))"
+                  }
+                }
+              ]
+    """
+  } ?? ""
 
   // Glass is per-layer; so is how much of the ground shows through it. The
   // crossing's dots turn translucency off: they sit on white paint, and letting
@@ -370,7 +391,7 @@ func iconJSON(_ paint: IconPaint, layers: [(file: String, translucent: Bool)]) -
             {
               "image-name": "\(layer.file)",
               "name": "\(layer.file.split(separator: ".").first ?? "")",
-              "is-glass": true
+              "is-glass": true\(dark)
             }
           ],
           "shadow": {
@@ -385,14 +406,16 @@ func iconJSON(_ paint: IconPaint, layers: [(file: String, translucent: Bool)]) -
     """
   }
 
-  // Behind first, as Walky.icon lists the two trailing walkers before the lead.
+  // `layers` is given behind-first, and Icon Composer lists front-first -- the
+  // first group is the one drawn on top, as its sidebar shows. Written the
+  // other way round, the crossing was painted over the walkers standing on it.
   return """
   {
     "fill": {
       "automatic-gradient": "\(fill)"
     },
     "groups": [
-  \(layers.map(group).joined(separator: ",\n"))
+  \(layers.reversed().map(group).joined(separator: ",\n"))
     ],
     "supported-platforms": {
       "circles": [
@@ -445,7 +468,8 @@ func preview(of bundle: URL, to file: URL) {
   // after: ImageMagick hands an SVG to its delegate on an opaque white ground
   // unless told otherwise, which paints out everything already composited.
   var args = ["-size", "\(canvas)x\(canvas)", "xc:\(ground)"]
-  for group in icon.groups {
+  // Front-first in the document, so composited from the back of the list.
+  for group in icon.groups.reversed() {
     for layer in group.layers {
       args += ["-background", "none",
                bundle.appending(path: "Assets/\(layer.image)").path,

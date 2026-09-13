@@ -67,6 +67,19 @@ public enum AppIconFamily: String, CaseIterable, Sendable {
 public struct IconPaint: Sendable {
   public let ground: RGB
   public let ink: RGB
+
+  /// What the art is painted in for the dark rendition, or nil where `ink`
+  /// already works there.
+  ///
+  /// Dark mode swaps the ground for the system's own near-black tile, so the
+  /// question is which of the pair stands out against *that*: a pale ink keeps
+  /// its place, a dark one gives it to the ground's colour. Measured, like
+  /// `AppIcons.ink(on:)`, and against `Grounds.classic` because that is the
+  /// tile the system draws.
+  public var darkInk: RGB? {
+    let tile = Grounds.classic.background
+    return contrastRatio(ground, tile) > contrastRatio(ink, tile) ? ground : nil
+  }
 }
 
 /// Which drawing an icon is.

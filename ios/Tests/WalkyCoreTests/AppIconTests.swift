@@ -29,6 +29,46 @@ struct AppIconTests {
     }
   }
 
+  /// The same claim for the dark rendition, which throws the ground away and
+  /// draws the art on a near-black tile of its own. Paper, orange, teal, lime
+  /// and sky all passed the test above and went dark-on-dark here.
+  @Test("Every icon's art reads in dark mode")
+  func darkReads() {
+    let tile = Grounds.classic.background
+    for icon in AppIcons.alternates {
+      let paint = try! #require(icon.paint)
+      let ratio = contrastRatio(paint.darkInk ?? paint.ink, tile)
+      #expect(ratio >= 3.0, "\(icon.id) is \(String(format: "%.1f", ratio)) : 1 in dark mode")
+    }
+  }
+
+  /// The committed bundles are what ships, so they have to carry the dark
+  /// repaint exactly where the table asks for one.
+  @Test("Bundles are repainted for dark mode where the table says")
+  func darkIsDrawn() throws {
+    for icon in AppIcons.alternates {
+      let paint = try #require(icon.paint)
+      let json = try String(
+        contentsOf: ios.appending(path: "App/\(icon.name!).icon/icon.json"), encoding: .utf8)
+      #expect(json.contains("\"appearance\": \"dark\"") == (paint.darkInk != nil),
+              "\(icon.id) is stale -- run: swift run walky-icons")
+    }
+  }
+
+  /// Icon Composer draws its first group on top. The crossing is ground, so
+  /// whatever walks on it -- dots or figure -- has to come before it.
+  @Test("Walkers are drawn in front of the crossing")
+  func walkersInFront() throws {
+    for icon in AppIcons.alternates {
+      let json = try String(
+        contentsOf: ios.appending(path: "App/\(icon.name!).icon/icon.json"), encoding: .utf8)
+      let walker = try #require(json.range(of: "\"image-name\": \"walker"))
+      let stripes = try #require(json.range(of: "\"image-name\": \"stripes"))
+      #expect(walker.lowerBound < stripes.lowerBound,
+              "\(icon.id) paints its crossing over its walkers -- run: swift run walky-icons")
+    }
+  }
+
   /// An accent used as a ground takes whichever ink measures better, so no
   /// other choice may beat the one made.
   @Test("The ink chosen is the better of the two")
