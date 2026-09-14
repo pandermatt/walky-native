@@ -72,6 +72,20 @@ final class MapImporter {
   /// round number: see `ImportBudget`, and the table in `ios/README.md`.
   var sideMetres: Double = 380
 
+  /// How much further than the import Apple's map reaches, in real metres, on
+  /// every side.
+  ///
+  /// The buildings stop at the edge of the box and the ground used to stop with
+  /// them, so zooming out or panning to the edge of an import showed the map
+  /// ending in a hard line against the bare ground colour -- the one view that
+  /// most looks like a model. With a margin the street carries on past the last
+  /// wall, the way it does outside a model's frame.
+  ///
+  /// Real metres rather than world units, so it is the same piece of the earth
+  /// at 1:1 and at 1:20. The snapshot keeps its size in pixels, so the ground
+  /// is proportionally softer close up.
+  static let groundMarginMetres: Double = 200
+
   /// Real metres to one world metre: 10 is a 1:10 model.
   ///
   /// Ten by default, which is not realism but legibility. At 1:1 a pedestrian
@@ -267,7 +281,7 @@ final class MapImporter {
     // From the anchor, so the crop follows the ratio the buildings were placed
     // at. Re-deriving it from PX_PER_METRE here is how the ground and the walls
     // would come apart by exactly the scale factor.
-    let half = anchor.worldHalfWidth(sideMetres: sideMetres)
+    let half = anchor.worldHalfWidth(sideMetres: sideMetres + 2 * Self.groundMarginMetres)
     basemap.snapshot(anchor: anchor,
                      worldRect: CGRect(x: -half, y: -half, width: half * 2, height: half * 2),
                      dark: dark) { [weak self] problem in

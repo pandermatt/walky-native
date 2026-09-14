@@ -13,7 +13,8 @@ import WalkySim
 /// world space after the existing transform, so it pans and zooms with the
 /// world for free and a stale one simply scales in place.
 ///
-/// v1 takes **one** snapshot, of the imported area, and never refreshes it.
+/// v1 takes **one** snapshot, of the imported area plus a margin round it (see
+/// `MapImporter.groundMarginMetres`), and never refreshes it.
 /// Zoom well past the import and it goes soft, which is the honest cost of not
 /// yet having a settle-and-resnapshot rule. See `ios/README.md`.
 @MainActor
