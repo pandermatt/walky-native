@@ -13,6 +13,8 @@ struct MapCanvas: View {
   let redraw: Redraw
   let basemap: Basemap
   let stats: () -> DebugStats
+  /// Drawing the phone's camera on another screen rather than owning it.
+  var mirroring = false
   @State private var cache = RenderCache()
 
   var body: some View {
@@ -27,7 +29,8 @@ struct MapCanvas: View {
       // `@unchecked Sendable`: if SwiftUI ever renders this off the main
       // thread, this traps loudly instead of racing the simulation quietly.
       MainActor.assumeIsolated {
-        MapRenderer.draw(world, cache, stats(), basemap: sheet, into: &ctx, size: size)
+        MapRenderer.draw(world, cache, stats(), basemap: sheet, into: &ctx, size: size,
+                         mirroring: mirroring)
       }
     }
     .ignoresSafeArea()

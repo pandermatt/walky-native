@@ -321,6 +321,23 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # The map on an AirPlay or cabled display, controls left on the phone.
+        # See App/Render/ExternalDisplay.swift.
+        #
+        # Declared here and not only in code: without an entry for the role in
+        # the manifest iOS never offers the app an external display session at
+        # all, so a delegate that would have answered for one is simply never
+        # asked, and the TV mirrors. SwiftUI's `WindowGroup` still supplies the
+        # app role, so that role is deliberately absent from the list.
+        #
+        # Multiple scenes stays off: on an iPad it would mean multiple windows,
+        # each a RootView over the one shared model.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleExternalDisplayNonInteractive:
+              - UISceneConfigurationName: External display
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).ExternalDisplayDelegate
 
   # The iMessage sticker pack: no code, no binary, one compiled asset
   # catalogue. Everything in Stickers.xcstickers is written by

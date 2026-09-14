@@ -136,15 +136,27 @@ enum MapRenderer {
 
   static func draw(_ world: WalkyWorld, _ cache: RenderCache, _ stats: DebugStats,
                    basemap: Basemap.Sheet?,
-                   into ctx: inout GraphicsContext, size: CGSize) {
+                   into ctx: inout GraphicsContext, size: CGSize,
+                   mirroring: Bool = false) {
     cache.refresh(world)
     if world.settings.showLineToTarget { cache.refreshGoalPaths(world) }
 
     var vp = world.viewport
-    vp.width = size.width
-    vp.height = size.height
-    world.viewport = vp
-    let scale = vp.scale
+    var scale = vp.scale
+    if mirroring {
+      // The phone owns the camera: every touch is mapped through its size, so a
+      // TV writing its own size back would put each tap somewhere else. Instead
+      // the phone's view is grown until it fits this screen whole -- a portrait
+      // phone's full height on a landscape TV, with more map either side -- so
+      // what you frame on the phone is what the room sees, and bigger.
+      if vp.width > 1, vp.height > 1 {
+        scale *= Swift.min(size.width / vp.width, size.height / vp.height)
+      }
+    } else {
+      vp.width = size.width
+      vp.height = size.height
+      world.viewport = vp
+    }
 
     // The ground and every outline drawn over it come from the chosen theme.
     // On the classic ground these are exactly BACKGROUND and WHITE, so nothing

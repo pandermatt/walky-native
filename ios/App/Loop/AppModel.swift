@@ -77,8 +77,26 @@ final class Chrome {
 /// Owns the world, the loop and the observable shells around them.
 @MainActor
 final class AppModel {
+  /// One world however many screens show it: the phone's scene and an AirPlay
+  /// display's are two scenes with no view in common to hand a model down.
+  static let shared = AppModel()
+
   let world = WalkyWorld()
   let redraw = Redraw()
+  /// The TV's frame counter; see `ExternalMapView`.
+  let externalRedraw = Redraw()
+
+  /// Screens showing the map besides the phone.
+  ///
+  /// Keeps the phone awake while there is one: it is the remote, it sits on a
+  /// table while the room watches the TV, and auto-lock backgrounds the app --
+  /// which takes the scene off the TV and hands it back to mirroring.
+  var externalDisplays = 0 {
+    didSet {
+      UIApplication.shared.isIdleTimerDisabled = externalDisplays > 0
+      needsFrame()
+    }
+  }
   let basemap = Basemap()
   let importer = MapImporter()
   let scanner = RoomScanner()
@@ -196,12 +214,16 @@ final class AppModel {
     if world.advance(link.timestamp * 1000) { renderPending = true }
     if world.running { renderPending = true }
     tickCount += world.simTicks - before
-    if renderPending && !isCovered {
+    // A covered phone still owes the TV its frames. Its own map stays unpainted
+    // behind the sheet, and uncovering sets `renderPending` to catch it up.
+    let onPhone = !isCovered, onExternal = externalDisplays > 0
+    if renderPending && (onPhone || onExternal) {
       renderPending = false
       // Before the frame, not inside it: the navigation rebuild is model work.
       world.prepareForRender()
       frameCount += 1
-      redraw.version &+= 1
+      if onPhone { redraw.version &+= 1 }
+      if onExternal { externalRedraw.version &+= 1 }
     }
     if link.timestamp - lastSecond >= 1 {
       fps = frameCount

@@ -8,7 +8,8 @@ import WalkyCore
 /// would make arming a tool repaint the map and stepping the crowd re-evaluate
 /// the toolbar.
 struct RootView: View {
-  @State private var model = AppModel()
+  /// The shared one, because a TV connected over AirPlay draws the same world.
+  @State private var model = AppModel.shared
   @State private var router: PointerRouter?
   @State private var sheet: Sheet?
   /// The two file sheets are the system's, not ours, so they are `Bool`s beside
