@@ -16,6 +16,9 @@ public final class RectangleTool: Tool {
   /// Where the pointer went down, while it is still down.
   private var pressAt: Point?
   private var mouse: Point?
+  /// The map's spin, cached on the way past because `preview()` has no context
+  /// -- the same trick `BorderTool` plays with the border thickness.
+  private var rotation: Double = 0
 
   public init() {}
 
@@ -23,10 +26,12 @@ public final class RectangleTool: Tool {
     if e.buttons != 1 { return }
     pressAt = snap(e.world)
     mouse = e.world
+    rotation = ctx.viewRotation()
   }
 
   public func onPointerMove(_ e: PointerInfo, _ ctx: ToolContext) {
     mouse = e.world
+    rotation = ctx.viewRotation()
     ctx.requestRender()
   }
 
@@ -56,17 +61,24 @@ public final class RectangleTool: Tool {
     commit(f, here, ctx)
   }
 
+  /// The band goes with the pointer. `first` stays: a corner already placed is
+  /// a rectangle half-drawn, and leaving the window must not abandon it.
+  public func pointerLeft() {
+    mouse = nil
+  }
+
   public func cancel() {
     first = nil
     pressAt = nil
     mouse = nil
+    rotation = 0
   }
 
   public func preview() -> ToolPreview {
     let anchor = pressAt ?? first
     if let anchor, let mouse {
       var p = ToolPreview()
-      p.pendingRect = (anchor, mouse)
+      p.pendingRect = orientedRectangle(anchor, mouse, rotation)
       return p
     }
     var p = ToolPreview()
@@ -75,8 +87,11 @@ public final class RectangleTool: Tool {
   }
 
   private func commit(_ a: Point, _ b: Point, _ ctx: ToolContext) {
-    if abs(b.x - a.x) >= 1 && abs(b.y - a.y) >= 1 {
-      _ = ctx.addWall(rectanglePolygon(a, b), nil)
+    // The size test asks the drag, not the world box: on a turned map a
+    // diagonal drag has a wide bounding box and can still be a sliver.
+    let (u, v) = (toViewFrame(a, ctx.viewRotation()), toViewFrame(b, ctx.viewRotation()))
+    if abs(v.x - u.x) >= 1 && abs(v.y - u.y) >= 1 {
+      _ = ctx.addWall(orientedRectangle(a, b, ctx.viewRotation()), nil)
     }
     cancel()
     ctx.requestRender()

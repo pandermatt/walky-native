@@ -46,6 +46,26 @@ public final class Navigation {
   private var fieldOrder: [Int] = []
   private var fieldByWall: [Int: DijkstraResult] = [:]
 
+  /// Which obstacles belong to which wall, in the order `obstacles` holds them.
+  ///
+  /// Three methods -- `nextWaypoint`'s direct branch, `goalAnchor` and
+  /// `hasArrived` -- wanted "the parts of this one wall" and got it by walking
+  /// every obstacle on the map and comparing `wallId`. On a 600m import that is
+  /// 3,393 comparisons to find the handful that make up a goal, and
+  /// `hasArrived` alone runs twice per agent per tick, so a thousand
+  /// pedestrians paid several million comparisons a tick to look at the same
+  /// two parts.
+  ///
+  /// Indices rather than the parts themselves, ascending, so each loop visits
+  /// exactly what it visited before in exactly the order it visited it. This
+  /// changes no answer -- it is `BlockerIndex`'s own argument: the table stops
+  /// them being visited, not tested differently.
+  ///
+  /// Built in `install` beside `BlockerIndex`, and for the same reason: it
+  /// costs one pass over the obstacles and nothing has to promise it is
+  /// `Sendable`.
+  private var partsByWall: [Int: [Int32]] = [:]
+
   private var radius: Double = 13
   /// The graph's clear-ground edge weights, kept when a recost writes crowd
   /// slowdowns into the working copy.
@@ -110,6 +130,10 @@ public final class Navigation {
                              uniquingKeysWith: { a, _ in a })
     blockerIndex = BlockerIndex()
     blockerIndex.build(blockerGroups)
+    partsByWall = [:]
+    for (i, part) in graph.blockers.obstacles.enumerated() {
+      partsByWall[part.wallId, default: []].append(Int32(i))
+    }
     baseWeights = graph.csr.weights
     edgeSlow = [Float](repeating: 1, count: graph.csr.targets.count)
     recostTurn = 0
@@ -140,6 +164,14 @@ public final class Navigation {
       for i in 0..<edgeSlow.count { edgeSlow[i] = 1 }
       graph.csr.weights = baseWeights
     } else {
+      // Where anybody is at all. An edge whose every sample point is further
+      // than `window` from the whole crowd scores `crowdSlowdown(0)`, which is
+      // exactly 1, on every sample -- so its EMA is `slow + (1 - slow) / 2` and
+      // its weight is `base * eased`. When its slowdown is *already* 1 both
+      // come out unchanged, bit for bit, and the work was to compute a number
+      // it already held. On a town with the crowd in one plaza that is nearly
+      // every edge on the map.
+      let crowd = hash.occupiedBounds
       for u in 0..<graph.csr.nodeCount {
         let from = graph.nodes[u]
         var e = Int(graph.csr.offsets[u])
@@ -147,6 +179,15 @@ public final class Navigation {
         while e < end {
           defer { e += 1 }
           let to = graph.nodes[Int(graph.csr.targets[e])]
+          // Every sample lies on the segment, so the segment's own box grown by
+          // `window` bounds everything this edge could ever see.
+          if edgeSlow[e] == 1
+              && (Swift.max(from.x, to.x) + window < crowd.minX
+                  || Swift.min(from.x, to.x) - window > crowd.maxX
+                  || Swift.max(from.y, to.y) + window < crowd.minY
+                  || Swift.min(from.y, to.y) - window > crowd.maxY) {
+            continue
+          }
           let len = Double(baseWeights[e])
           let samples = jsMin(SAMPLES_MAX, jsMax(1, (len / SAMPLE_SPACING).rounded(.up)))
           var slow: Double = 0
@@ -155,7 +196,10 @@ public final class Navigation {
             let t = (s + 0.5) / samples
             let px = from.x + (to.x - from.x) * t
             let py = from.y + (to.y - from.y) * t
-            slow += crowdSlowdown(Double(hash.query(px, py, window, -1, x, y)))
+            // `countNear` rather than `query`: this reads the number and
+            // never the list, and filling the list is most of what a query in
+            // a dense crowd costs. See `SpatialHash.countNear`.
+            slow += crowdSlowdown(Double(hash.countNear(px, py, window, -1, x, y)))
             s += 1
           }
           let eased = Double(edgeSlow[e]) + (slow / samples - Double(edgeSlow[e])) * SLOW_EMA
@@ -171,6 +215,8 @@ public final class Navigation {
   }
 
   public var obstacles: [Obstacle] { graph.blockers.obstacles }
+  public var graphNodeCount: Int { graph.nodes.count }
+  public var graphEdgeCount: Int { graph.csr.targets.count }
   /// Whole-wall convex hulls, expanded: the broad phase in front of the parts.
   public var shells: [WallShell] { graph.blockers.shells }
   public var blockers: Blockers { graph.blockers }
@@ -196,20 +242,17 @@ public final class Navigation {
     // because every successful step sets `replan` and clears the waypoint. Same
     // obstacles in the same order, so the answer is unchanged; `hasArrived`
     // below has always done it this way.
-    var anyPart = false
-
     // A concave goal is several convex parts; take the nearest visible point on
     // any of them.
+    guard let parts = partsByWall[goalWallId] else { return nil }
     var direct: Point?
     var directDist = Double.infinity
-    for part in graph.blockers.obstacles {
-      if part.wallId != goalWallId { continue }
-      anyPart = true
+    for j in parts {
+      let part = graph.blockers.obstacles[Int(j)]
       guard let p = closestVisiblePointOnHull(from, part) else { continue }
       let d = distance(from, p)
       if d < directDist { directDist = d; direct = p }
     }
-    if !anyPart { return nil }
     if let direct { return Waypoint(point: direct, cost: directDist, node: -1) }
 
     guard let result = fieldByWall[goalWallId] else { return nil }
@@ -319,9 +362,8 @@ public final class Navigation {
   public func goalAnchor(_ goalWallId: Int, _ from: Point) -> Point? {
     var best: Point?
     var bestDist = Double.infinity
-    for part in graph.blockers.obstacles {
-      if part.wallId != goalWallId { continue }
-      let hull = part.hull
+    for j in partsByWall[goalWallId] ?? [] {
+      let hull = graph.blockers.obstacles[Int(j)].hull
       let n = hull.count
       for i in 0..<n {
         let p = closestPointOnSegment(hull[i], hull[(i + 1) % n], from)
@@ -334,9 +376,8 @@ public final class Navigation {
 
   /// True when the agent is close enough to its goal hull to stop.
   public func hasArrived(_ from: Point, _ goalWallId: Int, _ tolerance: Double) -> Bool {
-    for part in graph.blockers.obstacles {
-      if part.wallId != goalWallId { continue }
-      let hull = part.hull
+    for j in partsByWall[goalWallId] ?? [] {
+      let hull = graph.blockers.obstacles[Int(j)].hull
       let n = hull.count
       for i in 0..<n {
         let p = closestPointOnSegment(hull[i], hull[(i + 1) % n], from)

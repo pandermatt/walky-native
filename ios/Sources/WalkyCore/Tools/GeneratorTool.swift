@@ -24,18 +24,20 @@ import Foundation
 @MainActor
 public final class GeneratorTool: Tool {
   public let id = ToolId.generator
-  private var mouse: Point?
+  /// The block under the pointer, which is the whole preview -- see
+  /// `ToolPreview.markingWallId`.
+  private var marking: Int?
 
   public init() {}
 
   public func onPointerDown(_ e: PointerInfo, _ ctx: ToolContext) {
     if e.buttons != 1 { return }
-    mouse = e.world
+    marking = ctx.wallIdAt(e.world)
     ctx.requestRender()
   }
 
   public func onPointerMove(_ e: PointerInfo, _ ctx: ToolContext) {
-    mouse = e.world
+    marking = ctx.wallIdAt(e.world)
     ctx.requestRender()
   }
 
@@ -43,8 +45,9 @@ public final class GeneratorTool: Tool {
   /// before the finger leaves gives no chance to reconsider.
   public func onPointerUp(_ e: PointerInfo, _ ctx: ToolContext) {
     // No hover on iOS: once the finger is gone there is no pointer to preview
-    // under, and a ghost left at the last touch point sits there all session.
-    mouse = nil
+    // under, and a block left outlined under the last touch point sits there
+    // all session.
+    marking = nil
 
     if ctx.markGenerator(e.world) {
       ctx.deactivateTool()
@@ -55,16 +58,25 @@ public final class GeneratorTool: Tool {
   }
 
   public func cancel() {
-    mouse = nil
+    marking = nil
   }
 
+  public func pointerLeft() {
+    marking = nil
+  }
+
+  /// The block itself, marked as the door it is about to be.
+  ///
+  /// It used to be the same ring the goal tool aims with, on the argument that
+  /// the two ask the same kind of question. They do not: a goal is aimed at a
+  /// point on the map, and this *converts a block you are pointing at*. A ring
+  /// at the cursor said where the cursor was -- which the cursor was already
+  /// saying -- and three tools were drawing the same ring. Outlining the block
+  /// says which block, and says it in the language doors are already drawn in.
   public func preview() -> ToolPreview {
-    guard let mouse else { return .empty }
+    guard let marking else { return .empty }
     var p = ToolPreview()
-    // The same ring the goal tool aims with: the two ask the same kind of
-    // question of the same kind of thing, and should not look like two
-    // different gestures.
-    p.cursorGhost = CursorGhost(kind: .target, at: mouse, size: 10)
+    p.markingWallId = marking
     return p
   }
 }

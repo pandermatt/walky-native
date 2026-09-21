@@ -41,6 +41,23 @@ public enum Codec {
   /// for every other version it does not know.
   public static let VERSION_WALL_GENERATORS: UInt8 = 4
 
+  /// Spent. Version 5 said "this door has a side closed"; the field it named
+  /// now says the opposite -- which face people come *out* of -- and the same
+  /// bytes would read as a 180-degree lie. Burnt rather than reused, so a
+  /// version 5 payload is refused by name instead of opening mirrored, which is
+  /// the rule the paragraph above states.
+  public static let VERSION_DOOR_SIDES: UInt8 = 5
+
+  /// What this build writes when a door has been told which face to use.
+  ///
+  /// The same shape as version 4 and for the same reason: one more trailing
+  /// section, announced by one more flag bit, so a build that does not know
+  /// about it refuses the file by name instead of misreading the tail. A chosen
+  /// face is a door's, so this implies `VERSION_WALL_GENERATORS` -- and **a map
+  /// where no door has been told anything is still written as version 4 (or
+  /// 3)**, byte for byte what this build wrote before the feature existed.
+  public static let VERSION_DOOR_FACE: UInt8 = 6
+
   public static let FLAG_DEFLATED = 1
   public static let FLAG_LABELS = 2
   public static let FLAG_GENERATORS = 4
@@ -52,9 +69,19 @@ public enum Codec {
   /// `VERSION_WALL_GENERATORS`, which is what stops a version 3 reader ever
   /// seeing this bit and mis-reading the tail it does not know how to skip.
   public static let FLAG_WALL_GENERATORS = 16
+  /// Spent with version 5; see `VERSION_DOOR_SIDES`. Deliberately **not** in
+  /// `KNOWN_FLAGS`, which is what makes a file carrying it refuse.
+  public static let FLAG_DOOR_SIDES = 32
+  /// Which doors have been told which face to use. Version 6 only.
+  public static let FLAG_DOOR_FACE = 64
 
   static let KNOWN_FLAGS = FLAG_DEFLATED | FLAG_LABELS | FLAG_GENERATORS
-    | FLAG_SPEED_MPS | FLAG_WALL_GENERATORS
+    | FLAG_SPEED_MPS | FLAG_WALL_GENERATORS | FLAG_DOOR_FACE
+
+  /// A chosen face is a unit vector, and there is no float on the wire: three
+  /// decimal places, which is a thousandth of a right angle's worth of
+  /// direction and far finer than the side it is naming.
+  static let FACING_QUANTUM: Double = 1000
 
   /// Sub-unit precision for the one thing in a map that is not a whole number.
   static let VIEW_QUANTUM: Double = 16   // at the deepest zoom, under 4px

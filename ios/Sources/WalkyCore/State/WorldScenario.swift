@@ -52,15 +52,21 @@ public extension WalkyWorld {
     // list is empty. See `CodecScenario.encodeBody`.
     var serialGenerators: [SerializedGenerator] = []
     var wallGenerators: [WallGeneratorRef] = []
+    var doorSides: [DoorSideRef] = []
     for (index, wall) in walls.enumerated() {
       guard let generator = wall.generator else { continue }
       wallGenerators.append(WallGeneratorRef(wallIndex: index,
                                              rate: generator.rate,
                                              goal: generator.goal))
+      if let facing = generator.outFacing {
+        doorSides.append(DoorSideRef(wallIndex: index, facing: facing))
+      }
       // Where a v3 reader will put its block: beside the wall rather than in
       // it, because a generator standing inside a wall is one that can never
       // let anybody out. `generatorMouth` is the same point this world emits
-      // from, so the two ports behave alike as well as read alike.
+      // from, so the two ports behave alike as well as read alike -- and since
+      // it already answers with the face the door uses, a reader that never
+      // learns about chosen faces still puts its block on the right one.
       serialGenerators.append(SerializedGenerator(at: generatorMouth(wall),
                                                   rate: generator.rate,
                                                   goal: generator.goal,
@@ -76,7 +82,8 @@ public extension WalkyWorld {
       agents: serialAgents,
       labels: [],                       // the text tool is not ported; see ToolId
       generators: serialGenerators,
-      wallGenerators: wallGenerators)
+      wallGenerators: wallGenerators,
+      doorSides: doorSides)
   }
 
   /// Replaces the map with a saved one.
@@ -153,11 +160,16 @@ public extension WalkyWorld {
   /// anyway, and what this tool used to place before generators became walls.
   private func applyGenerators(_ core: ScenarioCore, _ newIdOf: [Int: Int]) {
     if !core.wallGenerators.isEmpty {
+      // A chosen face is named by the same wall index, so it is looked up once
+      // here rather than searched per door.
+      let faceAt = Dictionary(core.doorSides.map { ($0.wallIndex, $0.facing) },
+                                uniquingKeysWith: { first, _ in first })
       for ref in core.wallGenerators {
         guard ref.wallIndex >= 0, ref.wallIndex < core.walls.count,
               let id = newIdOf[core.walls[ref.wallIndex].id],
               let wall = walls.first(where: { $0.id == id }) else { continue }
-        wall.generator = Generator(rate: ref.rate, goal: newIdOf[ref.goal] ?? -1)
+        wall.generator = Generator(rate: ref.rate, goal: newIdOf[ref.goal] ?? -1,
+                                   outFacing: faceAt[ref.wallIndex])
       }
       return
     }

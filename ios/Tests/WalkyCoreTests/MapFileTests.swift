@@ -211,3 +211,117 @@ struct MapFileTests {
     #expect(fromLink.agents == fromFile.agents)
   }
 }
+
+/// The version 6 tail: which doors have been told which face to use.
+///
+/// The same shape as version 4 and for the same reason -- one more trailing
+/// section behind one more flag bit, so everything before it stays byte for
+/// byte what the older writer produced, and a build that does not know the flag
+/// refuses the file by name instead of misreading the tail.
+@MainActor
+@Suite("Saving a door's chosen face")
+struct DoorFaceFileTests {
+  private func withADoor() -> WalkyWorld {
+    let world = WalkyWorld()
+    world.settings.defaults = nil
+    world.addWallShape([rectanglePolygon(Point(600, -80), Point(700, 80))], nil)
+    world.addWallShape([rectanglePolygon(Point(-40, -40), Point(40, 40))], nil)
+    _ = world.toggleGeneratorAt(Point(0, 0))
+    _ = world.setGoalAt(Point(650, 0))
+    return world
+  }
+
+  /// The two steps a click takes: pick the door, then click one of its faces.
+  private func chooseWest(_ world: WalkyWorld) {
+    world.pickDoor(world.generators.first)
+    let west = world.doorFaces(world.generators[0]).min { $0.facing.x < $1.facing.x }
+    _ = world.chooseDoorFace(at: west!.face)
+  }
+
+  @Test("a door the goal still decides for is written as version 4")
+  func untoldDoorsStayAtVersionFour() {
+    let world = withADoor()
+    let bytes = MapFile.bytes(world.captureScenario())
+    #expect(bytes[1] == Codec.VERSION_WALL_GENERATORS)
+    #expect(Int(bytes[2]) & Codec.FLAG_DOOR_FACE == 0)
+  }
+
+  @Test("a chosen face makes it version 6, and survives the round trip")
+  func chosenFaceSurvives() {
+    let world = withADoor()
+    chooseWest(world)
+    let facing = try! #require(world.generators[0].generator!.outFacing)
+
+    let bytes = MapFile.bytes(world.captureScenario())
+    #expect(bytes[1] == Codec.VERSION_DOOR_FACE)
+    #expect(Int(bytes[2]) & Codec.FLAG_DOOR_FACE != 0)
+    // A chosen face is a door's, so it rides with the wall-generator tail.
+    #expect(Int(bytes[2]) & Codec.FLAG_WALL_GENERATORS != 0)
+
+    let opened = WalkyWorld()
+    opened.settings.defaults = nil
+    opened.apply(try! MapFile.read(bytes))
+    let back = try! #require(opened.generators.first?.generator?.outFacing)
+    // Three decimal places on the wire, and renormalised on the way in.
+    #expect(abs(back.x - facing.x) < 1e-3)
+    #expect(abs(back.y - facing.y) < 1e-3)
+    #expect(abs(jsHypot(back.x, back.y) - 1) < 1e-9)
+  }
+
+  @Test("and the same face is still the one it uses")
+  func theSameFaceIsStillChosen() {
+    let world = withADoor()
+    chooseWest(world)
+    let was = try! #require(world.mouthDirection(world.generators[0]))
+
+    let opened = WalkyWorld()
+    opened.settings.defaults = nil
+    opened.apply(try! MapFile.read(MapFile.bytes(world.captureScenario())))
+    let now = try! #require(opened.mouthDirection(opened.generators[0]))
+    #expect(abs(now.x - was.x) < 1e-3)
+    #expect(abs(now.y - was.y) < 1e-3)
+    // And it is still recognised as one of the block's four sides.
+    #expect(opened.doorFaces(opened.generators[0]).contains { $0.isChosen })
+  }
+
+  @Test("the point a web reader needs lands on the face in use")
+  func thePointIsOnTheChosenFace() {
+    // The v3 compatibility point is `generatorMouth`, which already answers
+    // with the face the door uses -- so a reader that never learns about
+    // chosen faces still puts its block where this one lets people out.
+    let world = withADoor()
+    chooseWest(world)
+    let core = world.captureScenario()
+    #expect(core.generators.count == 1)
+    #expect(core.doorSides.count == 1)
+    #expect(core.generators[0].at.x < 0, "the compatibility point is on the wrong face")
+  }
+
+  @Test("the version and the face flag have to agree")
+  func versionAndFlagMustAgree() {
+    let world = withADoor()
+    chooseWest(world)
+    var bytes = MapFile.bytes(world.captureScenario())
+
+    var noFlag = bytes
+    noFlag[2] = UInt8(Int(noFlag[2]) & ~Codec.FLAG_DOOR_FACE)
+    #expect(throws: ScenarioLinkError.self) { _ = try MapFile.read(noFlag) }
+
+    bytes[1] = Codec.VERSION_WALL_GENERATORS
+    #expect(throws: ScenarioLinkError.self) { _ = try MapFile.read(bytes) }
+  }
+
+  /// Version 5 said "this door has a side *closed*". The field it named now
+  /// says which face people come *out* of, so the same bytes would read as the
+  /// opposite instruction. Burnt rather than reused: such a file is refused by
+  /// name instead of opening mirrored.
+  @Test("a version 5 map is refused rather than read backwards")
+  func theSpentVersionIsRefused() {
+    let world = withADoor()
+    chooseWest(world)
+    var bytes = MapFile.bytes(world.captureScenario())
+    bytes[1] = Codec.VERSION_DOOR_SIDES
+    bytes[2] = UInt8((Int(bytes[2]) & ~Codec.FLAG_DOOR_FACE) | Codec.FLAG_DOOR_SIDES)
+    #expect(throws: ScenarioLinkError.self) { _ = try MapFile.read(bytes) }
+  }
+}

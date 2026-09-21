@@ -61,6 +61,13 @@ public final class WalkyWorld: PointerHost {
 
   public var running = false
   public var mouseWorld: Point?
+  /// Where a *pointer* is hovering, as opposed to where a finger is pressing.
+  ///
+  /// Nil on iOS by construction rather than by policy: `PointerRouter.hovered`
+  /// is the only thing that writes it, and the only caller of that is the Mac's
+  /// `MacCanvas`. What it gates is the doorstep controls -- you cannot click a
+  /// control you cannot see, and on a touchscreen there is nothing to see.
+  public var hoverWorld: Point?
   /// Bumped whenever the map changes, and whenever the crowd does. Split
   /// because a renderer can cache wall geometry against the first and must not
   /// against the second -- conflating them cost the web app ~800ms/frame.
@@ -144,10 +151,30 @@ public final class WalkyWorld: PointerHost {
     requestRender()
   }
 
+  /// The crowd changed and the map did not.
+  ///
+  /// The reason the two revisions are separate at all, finally used for the
+  /// thing it was split for. `worldRevision` is the renderer's wall-cache key,
+  /// and rebuilding that cache runs `groupWalls`, an all-pairs union-find with
+  /// no bounding-box reject: **8.6 ms on a 200-block map, against 0.011 ms for
+  /// the placement itself** (`BrushCostBench`). The brush commits an edit on
+  /// every pointer event, so bumping the world revision there spent half a
+  /// frame's budget per event redrawing walls that had not moved.
+  ///
+  /// `measure` already made this argument one function along; painting a
+  /// pedestrian moves no wall either.
+  func touchCrowd() {
+    agentRevision &+= 1
+    requestRender()
+  }
+
   public func setTool(_ id: ToolId?) {
     tool?.cancel()
     activeTool = id
     mouseWorld = nil
+    hoverWorld = nil
+    // A tool in hand means clicks belong to it, so nothing is on offer.
+    pickedDoorId = nil
     onToolChanged?(id)
     requestRender()
   }
@@ -159,7 +186,10 @@ public final class WalkyWorld: PointerHost {
     addWallShape: { [unowned self] polygons, options in self.addWallShape(polygons, options) },
     settings: { [unowned self] in SettingsSnapshot(self.settings) },
     pedestrianBlock: { [unowned self] at, cells in self.pedestrianBlock(at, cells) },
-    addPedestrians: { [unowned self] at in self.addPedestrians(at) },
+    // Unchecked on purpose: the brush checkpoints once per stroke.
+    addPedestrians: { [unowned self] at in
+      self.addPedestrians(at, cells: nil, checkpointed: false) },
+    checkpoint: { [unowned self] in self.checkpoint() },
     setGoalAt: { [unowned self] at in self.setGoalAt(at) },
     markGenerator: { [unowned self] at in self.toggleGeneratorAt(at) },
     selectPedestriansIn: { [unowned self] lasso in self.selectPedestriansIn(lasso) },
@@ -170,8 +200,59 @@ public final class WalkyWorld: PointerHost {
     notify: { [unowned self] message in self.onNotify?(message) },
     requestRender: { [unowned self] in self.requestRender() },
     colorAt: { [unowned self] at in self.pickWall(at)?.color },
+    wallIdAt: { [unowned self] at in self.pickWall(at)?.id },
     worldPerPixel: { [unowned self] in self.viewport.worldPerPixel },
+    viewRotation: { [unowned self] in self.viewport.rotation },
     measure: { [unowned self] a, b in self.measure(a, b) })
+
+  // MARK: - Paint
+
+  /// A colour for something new, from the ground's own palette.
+  ///
+  /// Every new pedestrian and every new wall comes through here rather than
+  /// through `randomBrightColor`, so the whole map is drawn from one set of six
+  /// -- which is what lets the renderer batch its fills. See `CrowdPalette`.
+  public func freshColor() -> RGB { CrowdPalette.random(on: settings.ground) }
+
+  /// The caller's options, with a colour filled in when they did not name one.
+  ///
+  /// `makeWall`'s own fallback stays `randomBrightColor`, because it is reached
+  /// by callers with no theme to ask -- a test, a fixture. This is the one that
+  /// has `settings`.
+  private func painted(_ options: WallOptions?) -> WallOptions {
+    var o = options ?? WallOptions()
+    if o.color == nil { o.color = freshColor() }
+    return o
+  }
+
+  /// Repaint what this app drew when the ground changes under it.
+  ///
+  /// Without this, a crowd placed on Classic stays at full-strength orange when
+  /// the ground turns to Paper, where orange scores 1.36 against the page and
+  /// is very nearly invisible. Only colours that came from a palette move --
+  /// `CrowdPalette.restyled` returns nil for anything else -- so an imported
+  /// map and a loaded file keep the colours they arrived with.
+  ///
+  /// Goals are *not* exempt, and that is deliberate: a goal painted from the
+  /// palette hands its colour to everybody walking to it (`resetPositions`), so
+  /// exempting it would leave the goal at full strength and its crowd darkened
+  /// -- the one pairing that has to agree.
+  ///
+  /// Not an undoable edit: the ground is a preference, not a change to the map,
+  /// and putting it on the undo stack would mean Undo silently changing a
+  /// setting.
+  public func restyle(to ground: Ground) {
+    for wall in walls {
+      if let c = CrowdPalette.restyled(wall.color, to: ground) { wall.color = c }
+    }
+    for i in 0..<agents.count {
+      let c = unpackRgb(agents.color[i])
+      if let fresh = CrowdPalette.restyled(c, to: ground) {
+        agents.color[i] = packRgb(fresh)
+      }
+    }
+    touch()
+  }
 
   // MARK: - Edits
 
@@ -181,7 +262,7 @@ public final class WalkyWorld: PointerHost {
     if usable.isEmpty { return false }
 
     checkpoint()
-    let wall = makeWall(usable, options ?? WallOptions())
+    let wall = makeWall(usable, painted(options))
     walls.append(wall)
     removeAgentsUnder(wall)
     markNavDirty()
@@ -202,7 +283,9 @@ public final class WalkyWorld: PointerHost {
 
     checkpoint()
     for polygons in usable {
-      let wall = makeWall(polygons, options ?? WallOptions())
+      // `painted` inside the loop, not outside it: each building takes
+      // its own colour, as it did when `makeWall` rolled one per call.
+      let wall = makeWall(polygons, painted(options))
       walls.append(wall)
       // Skipped entirely on the empty map an import usually lands on; this is
       // O(agents) per wall and there is no point paying it for nobody.
@@ -269,8 +352,9 @@ public final class WalkyWorld: PointerHost {
     }
   }
 
-  public func addPedestrians(_ at: Point) {
-    addPedestrians(at, cells: nil)
+  @discardableResult
+  public func addPedestrians(_ at: Point) -> Int {
+    addPedestrians(at, cells: nil).count
   }
 
   /// A crowd of a size somebody asked for, in one edit.
@@ -282,13 +366,17 @@ public final class WalkyWorld: PointerHost {
   /// through it would be a couple of hundred full copies and would bury the
   /// forty-deep undo stack under a single import.
   @discardableResult
-  public func addPedestrians(_ at: Point, cells: Int?) -> Int {
+  public func addPedestrians(_ at: Point, cells: Int?, checkpointed: Bool = true) -> [Point] {
     let spots = pedestrianBlock(at, cells)
-    if spots.isEmpty { return 0 }
-    checkpoint()
-    for p in spots { agents.add(p, randomBrightColor()) }
-    touch()
-    return spots.count
+    if spots.isEmpty { return [] }
+    // A drag checkpoints once, on the press, rather than once per dot: see
+    // `PedestrianTool`. Everything else -- a described crowd, a placed room --
+    // is a single edit and takes its checkpoint here.
+    if checkpointed { checkpoint() }
+    for p in spots { agents.add(p, freshColor()) }
+    // The crowd moved and the map did not. See `touchCrowd`.
+    touchCrowd()
+    return spots
   }
 
   /// Says, once, that a tool has to be picked.
@@ -305,14 +393,42 @@ public final class WalkyWorld: PointerHost {
     onNotify?("Nothing here yet — pick a tool below to start drawing.")
   }
 
-  /// A tap that went nowhere, with no tool armed.
+  /// A tap with no tool armed, at the point it landed on.
   ///
-  /// No policy here at all -- unlike `pannedWithoutTool` above, which owns the
-  /// "only on an empty map, only once" rule because only the world can answer
-  /// it. Whether an idle tap means anything depends on whether the controls are
-  /// hidden, and that is the app layer's business.
-  public func tappedWithoutTool() {
+  /// One piece of policy, and it is here because it is the world's: a pointer
+  /// hovering over a door's doorstep is looking at a control, and clicking it
+  /// closes that side. Everything else is unchanged -- whether an *idle* tap
+  /// means anything depends on whether the controls are hidden, and that is
+  /// still the app layer's business.
+  ///
+  /// Guarded on `hoverWorld`, so a finger can never hit a control a touchscreen
+  /// never drew.
+  public func tappedWithoutTool(at: Point) {
+    if hoverWorld != nil, clickedADoor(at) { return }
     onIdleTap?()
+  }
+
+  /// The door half of an idle click, in the order a click means them.
+  ///
+  /// True when it was spoken for, so the caller knows not to treat it as a tap
+  /// that went nowhere.
+  private func clickedADoor(_ at: Point) -> Bool {
+    // A face of the door already picked. First, because on a doorway slab the
+    // faces *are* the door, and sending the crowd out of the side you clicked
+    // from is what clicking a picked door means.
+    if chooseDoorFace(at: at) { return true }
+    // A door: put its sides on offer, or take them off again if it is the one
+    // already picked.
+    if let door = pickGenerator(at) {
+      pickDoor(pickedDoor?.id == door.id ? nil : door)
+      return true
+    }
+    // Anywhere else puts the picked door down, and that is all that click did.
+    if pickedDoor != nil {
+      pickDoor(nil)
+      return true
+    }
+    return false
   }
 
   /// Selects every pedestrian inside a lasso outline, and answers how many.
@@ -433,6 +549,172 @@ public final class WalkyWorld: PointerHost {
     walls.last { $0.generator != nil && wallContains($0, at) }
   }
 
+  /// One of a door's two doorsteps: where a crowd would appear on that side.
+  public struct DoorStep: Sendable {
+    /// The spot itself, in world units -- the same point `generatorMouth`
+    /// hands to `pedestrianBlock`.
+    public let at: Point
+    /// The direction from the door's middle, as a unit vector.
+    public let facing: Point
+    /// Whether this is the face the door has been told to use.
+    public let isChosen: Bool
+    /// The middle of that *face of the door*, flush with the block itself.
+    ///
+    /// Not `at`: the mouth stands `GENERATOR_CELLS` bodies clear of the door,
+    /// which is where people can legally appear and is far too far away to be
+    /// a mark for the side. A closed side is a fact about this edge of the
+    /// block, so it is drawn on the edge, touching it.
+    public let face: Point
+    /// How far the door reaches either way across that face, so the mark is
+    /// exactly as wide as the side it stands on.
+    public let half: Double
+    /// Which of the four this is, so the renderer can say "the one under the
+    /// cursor" without comparing computed floats.
+    public let index: Int
+  }
+
+  /// The middle of one face of a wall, and its half-width across.
+  ///
+  /// Both from the hull, so a rectangle gives its exact edge and anything else
+  /// gives the extent of the shape in that direction -- the same projection
+  /// `mouthAnchor` already takes, measured across as well as along.
+  func faceOf(_ wall: Wall, _ u: Point) -> (at: Point, half: Double) {
+    let here = middle(wall)
+    var reach = 0.0, across = 0.0
+    for p in wall.hull {
+      let (dx, dy) = (p.x - here.x, p.y - here.y)
+      reach = jsMax(reach, dx * u.x + dy * u.y)
+      across = jsMax(across, abs(dx * -u.y + dy * u.x))
+    }
+    return (Point(here.x + u.x * reach, here.y + u.y * reach), across)
+  }
+
+  /// The four sides of a block, as the faces a door can be told to use.
+  ///
+  /// The axis is the block's **longest hull edge**, so for a rectangle or a
+  /// scanned doorway slab these are its own four sides, exactly; for a traced
+  /// blob they are the four sides of the box around its long axis. Four either
+  /// way, which is the whole reason for taking an axis rather than walking the
+  /// hull: a traced building hulls to thirty-odd edges, several shorter than
+  /// the cursor's own reach, and offering those as controls would be offering
+  /// slivers.
+  ///
+  /// Empty for a degenerate block -- a hull of two points has no sides.
+  ///
+  /// Unlike the mouth, this does not need a goal: which way out is a fact about
+  /// the block, and it can be chosen before the door is aimed anywhere.
+  public func doorFaces(_ door: Wall) -> [DoorStep] {
+    guard door.hull.count >= 3 else { return [] }
+    var axis = Point(1, 0)
+    var longest = 0.0
+    for i in 0..<door.hull.count {
+      let a = door.hull[i], b = door.hull[(i + 1) % door.hull.count]
+      let (dx, dy) = (b.x - a.x, b.y - a.y)
+      let len = jsHypot(dx, dy)
+      if len > longest {
+        longest = len
+        axis = Point(dx / len, dy / len)
+      }
+    }
+    guard longest > 0 else { return [] }
+
+    let sides = [axis, Point(-axis.y, axis.x),
+                 Point(-axis.x, -axis.y), Point(axis.y, -axis.x)]
+    // Matched by direction rather than by equality: the chosen face survives a
+    // save as three decimal places, and a hull edge recomputed from rounded
+    // corners is not bit-identical to the vector that was stored.
+    var chosen = -1
+    if let out = door.generator?.outFacing {
+      var nearest = 0.9
+      for (i, u) in sides.enumerated() {
+        let dot = u.x * out.x + u.y * out.y
+        if dot > nearest {
+          nearest = dot
+          chosen = i
+        }
+      }
+    }
+
+    return sides.enumerated().map { index, u in
+      let f = faceOf(door, u)
+      return DoorStep(at: mouthAnchor(door, u), facing: u, isChosen: index == chosen,
+                      face: f.at, half: f.half, index: index)
+    }
+  }
+
+  /// How far off a face a click still lands on it, in screen points. Sized on
+  /// the glass like every other piece of chrome: a target that shrank with the
+  /// zoom would be unclickable on a floor plan, which is the map this is for.
+  public static let DOOR_FACE_GRAB: Double = 12
+
+  /// The door whose sides are on offer, or nil.
+  ///
+  /// Picked by *clicking a door*, and that is the whole interaction: the sides
+  /// are marks on the block itself, not something that appears under a cursor
+  /// wandering past. A map of thirty doors would otherwise flicker two controls
+  /// at you all the way across it.
+  private var pickedDoorId: Int?
+
+  /// Resolved every time rather than held, so undo, a clear, or the door being
+  /// un-marked all put it down by themselves -- there is no stale reference to
+  /// keep in step.
+  public var pickedDoor: Wall? {
+    guard let id = pickedDoorId else { return nil }
+    return walls.first { $0.id == id && $0.generator != nil }
+  }
+
+  /// Puts a door's sides on offer, or takes them off.
+  public func pickDoor(_ door: Wall?) {
+    guard pickedDoorId != door?.id else { return }
+    pickedDoorId = door?.id
+    touch()
+  }
+
+  /// The face of the picked door under a point, if any.
+  ///
+  /// Only the picked one: a face is a control, and a control nobody asked for
+  /// should not be answering clicks. Which face is decided by the side of the
+  /// block the click is on rather than by distance, so a doorway slab a few
+  /// units thick -- where both faces are within a finger of each other -- still
+  /// closes the side you clicked from.
+  public func doorFace(at: Point) -> DoorStep? {
+    guard let door = pickedDoor else { return nil }
+    let grab = Self.DOOR_FACE_GRAB * viewport.worldPerPixel
+    var best: DoorStep?
+    var nearest = -Double.infinity
+    for step in doorFaces(door) {
+      let (dx, dy) = (at.x - step.face.x, at.y - step.face.y)
+      let along = dx * step.facing.x + dy * step.facing.y
+      let across = abs(dx * -step.facing.y + dy * step.facing.x)
+      guard across <= step.half + grab, along >= -grab, along <= grab * 2 else { continue }
+      if along > nearest {
+        nearest = along
+        best = step
+      }
+    }
+    return best
+  }
+
+  /// Sends the picked door's crowd out of the face under a point. False when
+  /// there is no face there.
+  ///
+  /// Clicking the face it is already using puts it back to the goal's own side,
+  /// so the choice is reversible without there being a second control for
+  /// undoing it.
+  ///
+  /// `checkpoint()` and `touch()`, and deliberately **no `markNavDirty()`**:
+  /// not one wall corner moved, so the rebuild -- 2.1s on a 600m import -- is
+  /// not owed. This is the whole reason the face is stored on the generator
+  /// rather than built out of geometry.
+  @discardableResult
+  public func chooseDoorFace(at: Point) -> Bool {
+    guard let generator = pickedDoor?.generator, let step = doorFace(at: at) else { return false }
+    checkpoint()
+    generator.outFacing = step.isChosen ? nil : step.facing
+    touch()
+    return true
+  }
+
   /// The middle of a wall, for the questions that are about where it *is*
   /// rather than what it covers: which side of it the goal is on, and whether a
   /// lasso caught it.
@@ -446,44 +728,58 @@ public final class WalkyWorld: PointerHost {
     return Point((minX + maxX) / 2, (minY + maxY) / 2)
   }
 
-  /// Where a generator's people appear: clear of it, on the side its goal is on.
+  /// The direction a generator's people leave by, or nil when it is not aimed
+  /// anywhere and nobody comes out at all.
   ///
-  /// A generator is a wall, so nobody can stand in it, and something has to decide
-  /// which side of it they come out of. **The side the goal is on** is that
-  /// something, and it is the only rule here that is a choice rather than
-  /// arithmetic:
+  /// A generator is a wall, so nobody can stand in it, and something has to
+  /// decide which side of it they come out of. **The side the goal is on** is
+  /// the default answer, and it is arithmetic: deterministic, needing no
+  /// inside/outside test and no winding, and reading correctly in both the
+  /// cases that matter -- a doorway slab in a room wall sends its people
+  /// indoors because that is where the exit is, and a door on open ground faces
+  /// the way its crowd is headed.
   ///
-  /// - It is deterministic, which the whole model depends on.
-  /// - It reads correctly in both the cases that matter. A doorway slab in a
-  ///   room wall sends its people indoors, because that is where the exit is.
-  ///   A door dropped on open ground faces the way its crowd is headed, so
-  ///   people come out already pointing at where they are going.
-  /// - It needs nothing the world does not already know: no inside/outside
-  ///   test, no winding, and nothing stored that could go stale.
-  ///
-  /// The anchor is pushed out along that direction by the door's own extent
-  /// plus the block's half-width, so the block it hands to `pedestrianBlock`
-  /// starts where the door stops. `pedestrianBlock` then throws away whatever
-  /// is still illegal, exactly as the brush does.
-  func generatorMouth(_ source: Wall) -> Point {
+  /// What that rule cannot know is which way round the block the crowd is
+  /// wanted: a floor plan whose corridor and whose plaza are both "beside the
+  /// door", with the goal past the plaza. So a door may be told outright which
+  /// of its faces is the way out, and that is the only thing here that is
+  /// stored rather than derived -- see `Generator.outFacing`.
+  func mouthDirection(_ source: Wall) -> Point? {
+    if let out = source.generator?.outFacing { return out }
     let here = middle(source)
-    guard let goalId = source.generator?.goal, goalId >= 0,
-          let goal = walls.first(where: { $0.id == goalId }) else { return here }
+    guard let door = source.generator, door.goal >= 0,
+          let goal = walls.first(where: { $0.id == door.goal }) else { return nil }
     let there = middle(goal)
     let dx = there.x - here.x, dy = there.y - here.y
     let span = jsHypot(dx, dy)
     // A door whose goal is itself, or dead centre of it: there is no direction
     // to leave in, and nobody comes out until it is aimed somewhere else.
-    guard span > 0 else { return here }
-    let ux = dx / span, uy = dy / span
+    guard span > 0 else { return nil }
+    return Point(dx / span, dy / span)
+  }
 
+  /// The doorstep a mouth in that direction sits on.
+  ///
+  /// Pushed out by the door's own extent plus the block's half-width, so the
+  /// block it hands to `pedestrianBlock` starts where the door stops.
+  /// `pedestrianBlock` then throws away whatever is still illegal, exactly as
+  /// the brush does.
+  func mouthAnchor(_ source: Wall, _ u: Point) -> Point {
+    let here = middle(source)
     // How far the generator reaches in that direction, from its own hull.
     var reach = 0.0
     for p in source.hull {
-      reach = jsMax(reach, (p.x - here.x) * ux + (p.y - here.y) * uy)
+      reach = jsMax(reach, (p.x - here.x) * u.x + (p.y - here.y) * u.y)
     }
     let clear = reach + Double(GENERATOR_CELLS) * settings.pedestrianRadius
-    return Point(here.x + ux * clear, here.y + uy * clear)
+    return Point(here.x + u.x * clear, here.y + u.y * clear)
+  }
+
+  /// Where a generator's people appear. The middle of the door when it is aimed
+  /// nowhere, which is where nobody appears anyway.
+  func generatorMouth(_ source: Wall) -> Point {
+    guard let u = mouthDirection(source) else { return middle(source) }
+    return mouthAnchor(source, u)
   }
 
   /// Lets the doors out.
@@ -722,6 +1018,16 @@ public final class WalkyWorld: PointerHost {
     navGeneration &+= 1
   }
 
+  /// Whether asking for a graph right now would block.
+  ///
+  /// True only before the first one has ever landed -- `ensureNav` takes
+  /// `rebuildNavNow` then, which is 2.1s on a 600m import and runs on the main
+  /// actor. Read by the app so it can put that wait behind a label and take it
+  /// through `navReady` instead: the same argument `MapImporter` already makes
+  /// for showing "Building the navigation graph…" rather than an unexplained
+  /// freeze.
+  public var navNeedsFirstBuild: Bool { navDirty && !navBuilt }
+
   /// A graph to walk on, whatever it takes.
   ///
   /// The first one is built here and now: there is no old graph to carry on
@@ -829,7 +1135,7 @@ public final class WalkyWorld: PointerHost {
     }
     var goalColors: [Int32: RGB] = [:]
     for w in walls where w.isGoal { goalColors[Int32(w.id)] = w.color }
-    agents.resetPositions(goalColors, { randomBrightColor() })
+    agents.resetPositions(goalColors, { self.freshColor() })
     metrics.reset()
     touch()
   }

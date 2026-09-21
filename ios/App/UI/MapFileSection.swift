@@ -14,16 +14,28 @@ import WalkyCore
 struct MapFileSection: View {
   let onOpen: () -> Void
   let onSave: () -> Void
-  let onShare: () -> Void
+  /// Nil where there is nothing to share with: on a Mac a map is sent by
+  /// saving the file and handing over the file, and the sheet the phone raises
+  /// here is a `UIActivityViewController` that does not exist there. Absent
+  /// rather than disabled, which is the rule the room section already follows.
+  var onShare: (() -> Void)?
 
   var body: some View {
     Section {
       Button("Open…", systemImage: "folder", action: onOpen)
+      // "to Files" is the phone's word for where it goes; a Mac says Save and
+      // means the Finder.
+      #if os(iOS)
       Button("Save to Files…", systemImage: "square.and.arrow.down", action: onSave)
+      #else
+      Button("Save…", systemImage: "square.and.arrow.down", action: onSave)
+      #endif
       // Same file, different destination: Save picks a folder, Share picks a
       // person. Both hand over a `.walky`, so a map sent by AirDrop or Messages
       // opens on the other phone rather than arriving as something to look at.
-      Button("Share…", systemImage: "square.and.arrow.up", action: onShare)
+      if let onShare {
+        Button("Share…", systemImage: "square.and.arrow.up", action: onShare)
+      }
     } footer: {
       // Two lines, as every other footer in this sheet. The extension is worth
       // naming because it is the thing somebody will look for in Files, and the

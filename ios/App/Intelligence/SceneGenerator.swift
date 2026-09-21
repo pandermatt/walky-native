@@ -22,7 +22,7 @@ import WalkySim
 /// Gated on iOS 26 at the type level rather than per-method: the whole feature
 /// is unavailable below it, and the settings sheet asks `SceneGenerator.status`
 /// before it offers anything.
-@available(iOS 26.0, *)
+@available(iOS 26.0, macOS 26.0, *)
 @MainActor
 @Observable
 final class SceneGenerator {

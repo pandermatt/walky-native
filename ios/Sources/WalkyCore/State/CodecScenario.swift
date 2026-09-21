@@ -5,11 +5,20 @@ import WalkySim
 
 extension Codec {
   public static func header(flags: Int) -> [UInt8] {
-    // Version 4 exactly when the tail this build added is present, so a map
-    // that could have been written by the web still is. See
-    // `Codec.VERSION_WALL_GENERATORS`.
-    let version = flags & FLAG_WALL_GENERATORS != 0 ? VERSION_WALL_GENERATORS : VERSION
-    return [MAGIC, version, UInt8(truncatingIfNeeded: flags)]
+    [MAGIC, impliedVersion(flags), UInt8(truncatingIfNeeded: flags)]
+  }
+
+  /// The version a set of flags is written as: the newest tail it claims.
+  ///
+  /// Each of the tails this port added past version 3 comes with a version of
+  /// its own, so a build that cannot read one refuses the file rather than
+  /// misreading what follows. A map that claims none of them is written as
+  /// version 3 -- byte for byte what the web writes, and openable there. See
+  /// `Codec.VERSION_WALL_GENERATORS`.
+  static func impliedVersion(_ flags: Int) -> UInt8 {
+    if flags & FLAG_DOOR_FACE != 0 { return VERSION_DOOR_FACE }
+    if flags & FLAG_WALL_GENERATORS != 0 { return VERSION_WALL_GENERATORS }
+    return VERSION
   }
 
   /// Splits a payload into its flags and its body, checking the header is one
@@ -18,17 +27,13 @@ extension Codec {
   public static func readHeader(_ bytes: [UInt8]) throws -> (flags: Int, body: [UInt8]) {
     guard bytes.count >= 3 else { throw ScenarioLinkError.truncated }
     guard bytes[0] == MAGIC else { throw ScenarioLinkError.notWalky }
-    guard bytes[1] == VERSION || bytes[1] == VERSION_WALL_GENERATORS else {
-      throw ScenarioLinkError.wrongVersion
-    }
     let flags = Int(bytes[2])
     guard flags & ~KNOWN_FLAGS == 0 else { throw ScenarioLinkError.wrongVersion }
-    // The version and the flag have to agree: a version 3 payload claiming the
-    // version 4 section, or the reverse, is a payload nobody wrote.
-    let saysWallGenerators = flags & FLAG_WALL_GENERATORS != 0
-    guard saysWallGenerators == (bytes[1] == VERSION_WALL_GENERATORS) else {
-      throw ScenarioLinkError.wrongVersion
-    }
+    // The version and the flags have to agree, which also settles whether the
+    // version is one this build knows at all: a payload claiming a tail its
+    // version does not carry -- or carrying one it does not claim -- is a
+    // payload nobody wrote.
+    guard bytes[1] == impliedVersion(flags) else { throw ScenarioLinkError.wrongVersion }
     return (flags, Array(bytes.dropFirst(3)))
   }
 
@@ -42,6 +47,7 @@ extension Codec {
       | (core.labels.isEmpty ? 0 : FLAG_LABELS)
       | (core.generators.isEmpty ? 0 : FLAG_GENERATORS)
       | (core.wallGenerators.isEmpty ? 0 : FLAG_WALL_GENERATORS)
+      | (core.doorSides.isEmpty ? 0 : FLAG_DOOR_FACE)
   }
 }
 
@@ -187,6 +193,19 @@ extension Codec {
         w.varint(Double(ref.wallIndex))
         w.varint(ref.rate)
         w.varint((indexOfId[ref.goal].map { $0 + 1 }) ?? 0)
+      }
+    }
+
+    // And the version 6 tail after it, on the same terms: last, so everything
+    // before it is byte-identical to what a version 4 writer produces.
+    if !core.doorSides.isEmpty {
+      w.varint(core.doorSides.count)
+      for ref in core.doorSides {
+        w.varint(Double(ref.wallIndex))
+        // Zigzag rather than varint: half of every unit vector is negative, and
+        // `Writer.varint` clamps at zero.
+        w.zigzag(ref.facing.x * FACING_QUANTUM)
+        w.zigzag(ref.facing.y * FACING_QUANTUM)
       }
     }
 
@@ -340,6 +359,27 @@ extension Codec {
       }
     }
 
+    var doorSides: [DoorSideRef] = []
+    if flags & FLAG_DOOR_FACE != 0 {
+      let count = try r.count(CodecLimits.maxGenerators, "generators")
+      for _ in 0..<count {
+        let index = Int(try r.varint())
+        guard index >= 0, index < walls.count else {
+          throw ScenarioLinkError("that map names a wall it does not carry")
+        }
+        let x = try r.zigzag() / FACING_QUANTUM
+        let y = try r.zigzag() / FACING_QUANTUM
+        // Renormalised on the way in rather than trusted: the quantum rounds,
+        // and everything downstream takes this for a unit vector. A direction
+        // of no length names no side, so it is dropped rather than refused --
+        // the door simply has both sides open, which is a map that makes sense.
+        let span = jsHypot(x, y)
+        guard span > 0 else { continue }
+        doorSides.append(DoorSideRef(wallIndex: index,
+                                     facing: Point(x / span, y / span)))
+      }
+    }
+
     // Everything decoded and bytes still to go: the payload is not what it says
     // it is. Better an error than a map quietly missing its tail.
     guard r.done else { throw ScenarioLinkError.truncated }
@@ -347,6 +387,6 @@ extension Codec {
     return ScenarioCore(version: SCENARIO_VERSION, settings: clampSettings(loaded),
                         view: view, walls: walls, agents: agents,
                         labels: labels, generators: generators,
-                        wallGenerators: wallGenerators)
+                        wallGenerators: wallGenerators, doorSides: doorSides)
   }
 }

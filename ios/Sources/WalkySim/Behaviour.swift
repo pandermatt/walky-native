@@ -238,6 +238,7 @@ private func stepLengthOf(_ dx: Double, _ dy: Double) -> Double {
 }
 
 public final class Behaviour {
+
   private let agents: Agents
   private let nav: Navigation
   private let hash: SpatialHash
@@ -771,7 +772,19 @@ public final class Behaviour {
     let goal = nav.goalAnchor(Int(a.goal[i]), here)
       ?? Point(here.x + gx * reach, here.y + gy * reach)
     let goalHere = jsHypot(here.x - goal.x, here.y - goal.y)
-    let hereCrowd = crowdAt(here, room, i)
+
+    // The fan below asks `crowdAt` sixty-five times, and each one was a full
+    // hash query over a dense crowd -- for every pedestrian in a crush, every
+    // tick. Measured, that one line was an **8x regression on the whole
+    // simulation**: 1,000 agents cost 22.3 ms/tick with it and 2.9 ms without
+    // (`StepCostBench`, release). It arrived with the surrender feature, and
+    // the bench is opt-in, so nothing caught it.
+    // The baseline every probe is judged against -- and it is only ever read
+    // through `jsMin(hereCrowd * REFUGE_RELIEF, REFUGE_CAP)`, so once it is
+    // large enough to pin that at the cap it stops mattering what it is. Above
+    // `REFUGE_CAP / REFUGE_RELIEF` every value gives the same limit and the
+    // same refusals, so counting further is counting for nothing.
+    let hereCrowd = crowdAt(here, room, i, over: REFUGE_CAP / REFUGE_RELIEF)
 
     var best: Point?
     var bestScore = Double.infinity
@@ -787,7 +800,14 @@ public final class Behaviour {
         let p = Point(jsRound(here.x + dx * walk), jsRound(here.y + dy * walk))
         if insideAnyWallAnywhere(p) { continue }
         if !nav.canSee(here, p) { continue }
-        let crowd = crowdAt(p, room, i)
+        // Counted only as far as it can matter. A probe is refused the moment
+        // it holds more than `hereCrowd * REFUGE_RELIEF` or more than
+        // `REFUGE_CAP` -- which is three -- so nothing above the smaller of
+        // those two ever reaches the score below. Stopping there is the same
+        // answer: past the limit both the refusal and the value it would have
+        // carried are already decided.
+        let limit = jsMin(hereCrowd * REFUGE_RELIEF, REFUGE_CAP)
+        let crowd = crowdAt(p, room, i, over: limit)
         if crowd > hereCrowd * REFUGE_RELIEF || crowd > REFUGE_CAP { continue }
         let gained = (jsHypot(p.x - goal.x, p.y - goal.y) - goalHere) / reach
         let score = W_REFUGE_CROWD * crowd - W_REFUGE_WALK * gained
@@ -797,13 +817,22 @@ public final class Behaviour {
     return best
   }
 
-  /// How many pedestrians still walking are within `room` of a point.
-  private func crowdAt(_ p: Point, _ room: Double, _ selfIndex: Int) -> Double {
-    let a = agents
-    let n = hash.query(p.x, p.y, room, selfIndex, a.x, a.y)
-    var count: Double = 0
-    for k in 0..<n where a.arrived[Int(hash.results[k])] == 0 { count += 1 }
-    return count
+  /// How many pedestrians still walking are within `room` of a point, counted
+  /// no further than it takes to answer.
+  ///
+  /// The limit is what makes this cheap. A probe is refused the moment it holds
+  /// more than `hereCrowd * REFUGE_RELIEF`, or more than `REFUGE_CAP` -- which
+  /// is three -- so nothing above the smaller of those two ever reaches the
+  /// score below. Counting past that is work whose answer is thrown away, and
+  /// the fan did it sixty-five times per crushed pedestrian per tick.
+  ///
+  /// Gathering the neighbourhood once and re-testing it per probe was tried and
+  /// is *slower*: the superset covering all sixty-five probes is five times the
+  /// cells any one of them needs, and every probe then walks the whole of it.
+  private func crowdAt(_ p: Point, _ room: Double, _ selfIndex: Int,
+                       over limit: Double) -> Double {
+    hash.countWithin(p.x, p.y, room, selfIndex, agents.x, agents.y,
+                     skip: agents.arrived, limit: limit)
   }
 
   /// `insideAnyWall` for a point no substep primed. A refuge probe reaches ten

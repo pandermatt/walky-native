@@ -21,7 +21,7 @@ import WalkyCore
 /// on every streamed snapshot, dozens of times in a generation, and reading
 /// `isBusy` up in `RootView.body` would rebuild the toolbar underneath a finger
 /// each time.
-@available(iOS 26.0, *)
+@available(iOS 26.0, macOS 26.0, *)
 struct GeneratingBorder: View {
   let generator: SceneGenerator
 

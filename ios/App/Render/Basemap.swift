@@ -13,10 +13,15 @@ import WalkySim
 /// world space after the existing transform, so it pans and zooms with the
 /// world for free and a stale one simply scales in place.
 ///
-/// v1 takes **one** snapshot, of the imported area plus a margin round it (see
-/// `MapImporter.groundMarginMetres`), and never refreshes it.
-/// Zoom well past the import and it goes soft, which is the honest cost of not
-/// yet having a settle-and-resnapshot rule. See `ios/README.md`.
+/// One snapshot per import, of the imported area plus a margin round it (see
+/// `MapImporter.groundMarginMetres`). Zoom well past the import and it goes
+/// soft, which is the honest cost of not yet having a settle-and-resnapshot
+/// rule. See `ios/README.md`.
+///
+/// It *is* retaken when the lighting changes, which is why `taken` is kept:
+/// Apple's map is drawn light or dark by the snapshotter, so a sheet shot on
+/// the Classic ground and then looked at on Paper is a dark photograph under a
+/// near-white floor. See `refresh(dark:)`.
 @MainActor
 @Observable
 final class Basemap {
@@ -28,11 +33,24 @@ final class Basemap {
 
   private(set) var sheet: Sheet?
   private var task: Task<Void, Never>?
+  /// What the last snapshot was of, so it can be taken again in a different
+  /// light without the caller having to remember any of it.
+  private var taken: (anchor: GeoAnchor, worldRect: CGRect, dark: Bool)?
 
   func clear() {
     task?.cancel()
     task = nil
     sheet = nil
+    taken = nil
+  }
+
+  /// Retake the last snapshot in a different light, if the light has changed.
+  ///
+  /// Cheap to call on every appearance change: it answers immediately unless
+  /// there is a sheet and its lighting is now wrong.
+  func refresh(dark: Bool) {
+    guard let taken, taken.dark != dark else { return }
+    snapshot(anchor: taken.anchor, worldRect: taken.worldRect, dark: dark) { _ in }
   }
 
   /// Snapshot `worldRect`, and place the result by asking the snapshot itself
@@ -45,6 +63,7 @@ final class Basemap {
   func snapshot(anchor: GeoAnchor, worldRect: CGRect, dark: Bool,
                 pixels: CGFloat = 1024, onDone: @escaping (String?) -> Void) {
     task?.cancel()
+    taken = (anchor, worldRect, dark)
 
     let box = anchor.boundingBox(worldMinX: worldRect.minX, worldMinY: worldRect.minY,
                                  worldMaxX: worldRect.maxX, worldMaxY: worldRect.maxY)
@@ -59,7 +78,13 @@ final class Basemap {
     configuration.pointOfInterestFilter = .excludingAll
     options.preferredConfiguration = configuration
     options.showsBuildings = false
+    // The snapshotter is told which way to draw its own map; each platform
+    // has its own word for that.
+    #if os(iOS)
     options.traitCollection = UITraitCollection(userInterfaceStyle: dark ? .dark : .light)
+    #else
+    options.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    #endif
 
     let aspect = worldRect.height / max(worldRect.width, 1)
     options.size = CGSize(width: pixels, height: max(1, pixels * aspect))
@@ -72,14 +97,35 @@ final class Basemap {
       do {
         let shot = try await snapshotter.start()
         if Task.isCancelled { return }
-        guard let cgImage = shot.image.cgImage else {
+        // The snapshot's image is the platform's, and only one of the two
+        // hands over a `CGImage` as a property -- an `NSImage` is a list of
+        // representations, so it has to be asked to pick one.
+        #if os(iOS)
+        let picked = shot.image.cgImage
+        #else
+        let picked = shot.image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #endif
+        guard let cgImage = picked else {
           onDone("The map came back without an image."); return
         }
 
-        let a = shot.point(for: CLLocationCoordinate2D(latitude: topLeft.latitude,
-                                                       longitude: topLeft.longitude))
-        let b = shot.point(for: CLLocationCoordinate2D(latitude: bottomRight.latitude,
-                                                       longitude: bottomRight.longitude))
+        // Which way up the answers are is the platform's, and the two do not
+        // agree: UIKit measures an image from its top left, AppKit from its
+        // bottom left. Measured on a 400x300 snapshot of the same region, a
+        // Mac puts the north-west corner at y 225 and the south-east at y 75 --
+        // so `spanY` came out **negative**, `scaleY` with it, and the sheet
+        // was placed with a negative height, which draws nothing at all. That
+        // is the whole of why the basemap was missing on macOS.
+        //
+        // Flipped once, here, so everything below this line -- and the canvas
+        // the sheet is drawn on, which is top-left on both -- reads the same
+        // on both platforms.
+        let a = imagePoint(shot.point(for: CLLocationCoordinate2D(latitude: topLeft.latitude,
+                                                               longitude: topLeft.longitude)),
+                        height: shot.image.size.height)
+        let b = imagePoint(shot.point(for: CLLocationCoordinate2D(latitude: bottomRight.latitude,
+                                                               longitude: bottomRight.longitude)),
+                        height: shot.image.size.height)
         let spanX = b.x - a.x, spanY = b.y - a.y
         guard abs(spanX) > 0.5, abs(spanY) > 0.5 else {
           onDone("The map placed those two corners on top of each other."); return
@@ -99,4 +145,14 @@ final class Basemap {
       }
     }
   }
+}
+
+/// A point out of `MKMapSnapshotter.Snapshot.point(for:)`, in the top-left
+/// space the rest of this app measures in.
+private func imagePoint(_ point: CGPoint, height: CGFloat) -> CGPoint {
+  #if os(iOS)
+  point
+  #else
+  CGPoint(x: point.x, y: height - point.y)
+  #endif
 }

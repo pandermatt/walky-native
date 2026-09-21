@@ -14,9 +14,11 @@ public final class BorderTool: Tool {
   private var first: Point?
   private var pressAt: Point?
   private var mouse: Point?
-  /// `preview()` has no context, so the sizes it needs are cached on the way past.
+  /// `preview()` has no context, so what it needs is cached on the way past --
+  /// the sizes, and now the camera's own angle.
   private var thickness: Double = 12
   private var radius: Double = 13
+  private var rotation: Double = 0
 
   public init() {}
 
@@ -24,12 +26,12 @@ public final class BorderTool: Tool {
     if e.buttons != 1 { return }
     pressAt = snap(e.world)
     mouse = e.world
-    readSettings(ctx)
+    readContext(ctx)
   }
 
   public func onPointerMove(_ e: PointerInfo, _ ctx: ToolContext) {
     mouse = e.world
-    readSettings(ctx)
+    readContext(ctx)
     ctx.requestRender()
   }
 
@@ -54,10 +56,17 @@ public final class BorderTool: Tool {
     commit(f, here, ctx)
   }
 
+  /// As `RectangleTool.pointerLeft`: the frame stops following, the corner
+  /// already placed stays placed.
+  public func pointerLeft() {
+    mouse = nil
+  }
+
   public func cancel() {
     first = nil
     pressAt = nil
     mouse = nil
+    rotation = 0
   }
 
   public func preview() -> ToolPreview {
@@ -68,23 +77,25 @@ public final class BorderTool: Tool {
       return p
     }
     var p = ToolPreview()
-    p.pendingPolygons = borderFrame(anchor, mouse, thickness)
+    p.pendingPolygons = borderFrame(anchor, mouse, thickness, rotation)
     // Drawn in warning colour when the frame would have no usable interior.
-    p.pendingPolygonsInvalid = !borderFits(anchor, mouse, thickness, radius)
+    p.pendingPolygonsInvalid = !borderFits(anchor, mouse, thickness, radius, rotation)
     return p
   }
 
-  private func readSettings(_ ctx: ToolContext) {
+  private func readContext(_ ctx: ToolContext) {
     let s = ctx.settings()
     thickness = s.borderThickness
     radius = s.pedestrianRadius
+    rotation = ctx.viewRotation()
   }
 
   private func commit(_ a: Point, _ b: Point, _ ctx: ToolContext) {
-    if borderFits(a, b, thickness, radius) {
+    if borderFits(a, b, thickness, radius, rotation) {
       // Flagged as a border: the dashed hull skips it, since a frame's hull is
       // the room it encloses rather than the shape itself. See Wall.isBorder.
-      _ = ctx.addWallShape(borderFrame(a, b, thickness), WallOptions(isBorder: true))
+      _ = ctx.addWallShape(borderFrame(a, b, thickness, rotation),
+                           WallOptions(isBorder: true))
     }
     cancel()
     ctx.requestRender()

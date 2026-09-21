@@ -1,4 +1,5 @@
-# The Xcode app target, generated rather than committed.
+# The Xcode app targets -- the phone, the Mac and the sticker pack -- generated
+# rather than committed.
 #
 # A pbxproj is thousands of lines of UUIDs that Xcode rewrites on first save
 # and reports as "damaged" with no diagnostics when one entry is wrong. This
@@ -98,6 +99,17 @@ schemes:
       targets: { Walky: all }
     run: { config: Release }
     profile: { config: Release }
+    archive: { config: Release }
+
+  # The Mac app. Its own scheme rather than a second destination on Walky's:
+  # they are two targets with two Info.plists and two shells, sharing the
+  # package and everything in App/ that is neither a touch nor a camera.
+  WalkyMac:
+    build:
+      targets: { WalkyMac: all }
+    run: { config: Debug }
+    profile: { config: Release }
+    analyze: { config: Debug }
     archive: { config: Release }
 
 targets:
@@ -338,6 +350,129 @@ targets:
             UIWindowSceneSessionRoleExternalDisplayNonInteractive:
               - UISceneConfigurationName: External display
                 UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).ExternalDisplayDelegate
+
+  # The Mac app.
+  #
+  # Native rather than Catalyst or "Designed for iPad", and the port is what
+  # makes that cheap: `WalkyCore` holds the camera, the tools, the world and
+  # `PointerRouter` -- a state machine over points that has never heard of
+  # `UITouch` -- and `MapRenderer` draws through SwiftUI's `GraphicsContext`,
+  # which is the same type on both platforms. So what is *not* shared is only
+  # the shell: an `NSView` that turns mouse and trackpad events into the router's
+  # calls, a window, and the menu bar. That is the Mac/ folder, and nothing else.
+  #
+  # The excludes below are the phone's shell and the two features a Mac has no
+  # hardware for. Each is a file rather than an `#if`, which is the rule this
+  # target follows wherever it can: a guard inside a view makes every line of it
+  # answer two questions at once.
+  #
+  #   WalkyApp / RootView     The phone's `@main` and its sheet stack. Mac/ has
+  #                           its own, because a menu bar and a Settings scene
+  #                           are not a sheet stack with different padding.
+  #   TouchCanvas             Fingers. MacCanvas is the counterpart.
+  #   ExternalDisplay         The phone as the room's remote, with the map on a
+  #                           TV. A Mac window is already the big screen.
+  #   MapShareSheet           `UIActivityViewController`. Saving the file is how
+  #                           a Mac hands one over.
+  #   RoomScan* / RoomCapture RoomPlan wants a LiDAR camera. No Mac has one.
+  #   AppIconSection          Alternate icons are an iOS affordance.
+  #
+  # Building it:
+  #   xcodegen generate
+  #   xcodebuild build -project Walky.xcodeproj -scheme WalkyMac
+  WalkyMac:
+    type: application
+    platform: macOS
+    # macOS 26, where every other target here starts at the oldest OS it can.
+    # The difference is installed base: the phone app has one and this does not,
+    # and starting at 26 is what lets the shared chrome -- the toolbar's glass,
+    # the generating border, the describe-a-map section -- be the one design on
+    # both platforms instead of the Mac carrying a second, older one. Lowering
+    # it means writing those pre-Glass fallbacks for this window too.
+    deploymentTarget: "26.0"
+    sources:
+      - path: Mac
+      - path: App
+        excludes:
+          - "WalkyApp.swift"
+          - "RootView.swift"
+          - "Input/TouchCanvas.swift"
+          - "Render/ExternalDisplay.swift"
+          - "State/MapShareSheet.swift"
+          - "UI/AppIconSection.swift"
+          - "UI/RoomCaptureContainer.swift"
+          - "UI/RoomScanSection.swift"
+          - "UI/RoomScanner.swift"
+          - "*.icon/**"
+      - path: App/Walky.icon
+        type: file
+    dependencies:
+      - package: Walky
+        product: WalkyCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ch.pandermatt.walky
+        PRODUCT_NAME: Walky
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        ASSETCATALOG_COMPILER_APPICON_NAME: Walky
+        # No team here either; see the note on the phone target. On a Mac the
+        # fallback is "Sign to Run Locally", which is enough to run a sandboxed
+        # app on the machine that built it.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Mac/Walky.entitlements
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        ENABLE_HARDENED_RUNTIME: YES
+    entitlements:
+      path: Mac/Walky.entitlements
+      properties:
+        # Sandboxed, which on a Mac is a choice rather than a given -- and the
+        # right one for an app whose whole contact with the disk is a `.walky`
+        # somebody picked in a panel.
+        com.apple.security.app-sandbox: true
+        # The panels, and only what they hand back.
+        com.apple.security.files.user-selected.read-write: true
+        # Apple's map tiles and OpenStreetMap's footprints.
+        com.apple.security.network.client: true
+        # Importing the neighbourhood around you, when you ask for it.
+        com.apple.security.personal-information.location: true
+    info:
+      path: Mac/Info.plist
+      properties:
+        CFBundleDisplayName: Walky
+        # No UIUserInterfaceStyle equivalent: `MacRootView` states the window's
+        # scheme from the setting, as `RootView` does.
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.developer-tools
+        # Worded as what it is *for*, as the phone's are. There is no camera
+        # here, so this is the only privacy key the Mac app needs.
+        NSLocationUsageDescription: >-
+          Walky uses where you are to import the map around you.
+        NSLocationWhenInUseUsageDescription: >-
+          Walky uses where you are to import the map around you.
+        # The same exported type the phone declares, so one `.walky` is one
+        # type across both -- see `MapFile` and `UTType.walkyMap`.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: ch.pandermatt.walky.map
+            UTTypeDescription: Walky Map
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - walky
+        # No `LSSupportsOpeningDocumentsInPlace` here, where the phone
+        # declares it false: macOS rejects the key outright unless it is YES,
+        # and opening a map copies it onto the canvas rather than editing the
+        # file where it sits. See `WalkyMapDocument` for why this is not a
+        # document-based app.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Walky Map
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - ch.pandermatt.walky.map
 
   # The iMessage sticker pack: no code, no binary, one compiled asset
   # catalogue. Everything in Stickers.xcstickers is written by

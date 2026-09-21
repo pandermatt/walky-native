@@ -41,21 +41,44 @@ public final class Generator {
   public var beat: Double
   /// Ticks left before that clump arrives.
   public var wait: Double
+  /// Which face of the block people come out of, as a unit vector from its
+  /// middle. Nil to take the side the goal is on, which is every door made
+  /// before this existed and every door nobody has had an opinion about.
+  ///
+  /// The one thing about a door that arithmetic cannot answer. Where the mouth
+  /// *lands* is still derived -- the hull's reach along this direction plus the
+  /// block's half-width, none of it stored -- and this is only the single bit
+  /// of judgement the geometry does not contain: that the crowd should come out
+  /// into the corridor rather than into the room, whichever way the goal
+  /// happens to lie.
+  ///
+  /// A direction rather than a face index, because an index is a position in a
+  /// hull that a later edit can renumber, while a direction still means the
+  /// same thing afterwards. `WalkyWorld.doorFaces` matches it back to whichever
+  /// of the block's four sides it points at.
+  ///
+  /// One value, so a door has one output. Two would be a door that has to
+  /// divide its queue by a rule nobody has written, and no way to say what
+  /// that rule is.
+  public var outFacing: Point?
 
   public init(rate: Double, goal: Int = -1,
-              owed: Double = 0, beat: Double = 0, wait: Double = 0) {
+              owed: Double = 0, beat: Double = 0, wait: Double = 0,
+              outFacing: Point? = nil) {
     self.rate = rate
     self.goal = goal
     self.owed = owed
     self.beat = beat
     self.wait = wait
+    self.outFacing = outFacing
   }
 
   /// As `Wall.shallowCopy`, and for the same reason: a checkpoint that stored
   /// the object would alias the live one and undo nothing. The queue and the
   /// beat are part of what undo puts back.
   public func copy() -> Generator {
-    Generator(rate: rate, goal: goal, owed: owed, beat: beat, wait: wait)
+    Generator(rate: rate, goal: goal, owed: owed, beat: beat, wait: wait,
+              outFacing: outFacing)
   }
 }
 

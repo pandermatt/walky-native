@@ -72,3 +72,59 @@ public func wallOverlapsPolygon(_ wall: Wall, _ poly: [Point]) -> Bool {
 public func wallsOverlap(_ a: Wall, _ b: Wall) -> Bool {
   a.polygons.contains { wallOverlapsPolygon(b, $0) }
 }
+
+// MARK: - Boxes on a turned map
+
+/// A world point in the frame the screen's own axes run along.
+///
+/// A turned map has pulled the two apart: `Viewport.worldToScreen` spins world
+/// space by `rotation` on its way to the glass, so "along the top of the
+/// screen" stops being "along world +x". These two undo and redo exactly that
+/// spin -- about the world origin rather than about the camera, which is all a
+/// shape's *orientation* depends on and keeps both functions pure.
+public func toViewFrame(_ p: Point, _ rotation: Double) -> Point {
+  let (c, s) = (jsCos(rotation), jsSin(rotation))
+  return Point(p.x * c - p.y * s, p.x * s + p.y * c)
+}
+
+/// The inverse of `toViewFrame`.
+public func fromViewFrame(_ p: Point, _ rotation: Double) -> Point {
+  let (c, s) = (jsCos(rotation), jsSin(rotation))
+  return Point(p.x * c + p.y * s, p.y * c - p.x * s)
+}
+
+/// `rectanglePolygon`, but square to the screen rather than to the world.
+///
+/// Dragging a box out on a map that has been twisted thirty degrees used to
+/// give a box thirty degrees off the drag: the corners were world-axis-aligned,
+/// so the shape under the finger was a parallelogram of empty space and the
+/// wall landed skewed. The box you draw is the box you see, so the drag is
+/// squared up in the frame the screen is in and the corners are carried back
+/// into world space afterwards -- which is what *rotates the wall itself*, and
+/// is the whole of the difference. On a straight map this is the original
+/// function, byte for byte, so every drawn map and every fixture is untouched.
+public func orientedRectangle(_ a: Point, _ b: Point, _ rotation: Double) -> [Point] {
+  guard rotation != 0 else { return rectanglePolygon(a, b) }
+  return rectanglePolygon(toViewFrame(a, rotation), toViewFrame(b, rotation))
+    .map { fromViewFrame($0, rotation) }
+}
+
+/// `borderFrame`, squared to the screen the way `orientedRectangle` is. The
+/// four bars are built in the view frame -- overlapping corners and all, so the
+/// enclosure is sealed by the same arithmetic that seals a straight one -- and
+/// only then carried back into world space.
+public func borderFrame(_ a: Point, _ b: Point, _ thickness: Double,
+                        _ rotation: Double) -> [[Point]] {
+  guard rotation != 0 else { return borderFrame(a, b, thickness) }
+  return borderFrame(toViewFrame(a, rotation), toViewFrame(b, rotation), thickness)
+    .map { $0.map { fromViewFrame($0, rotation) } }
+}
+
+/// Whether a turned frame would leave usable space inside. Measured in the view
+/// frame for the reason `borderFrame` builds there: the width and height being
+/// checked are the ones the drag actually has, not the bounding box's.
+public func borderFits(_ a: Point, _ b: Point, _ thickness: Double, _ radius: Double,
+                       _ rotation: Double) -> Bool {
+  guard rotation != 0 else { return borderFits(a, b, thickness, radius) }
+  return borderFits(toViewFrame(a, rotation), toViewFrame(b, rotation), thickness, radius)
+}

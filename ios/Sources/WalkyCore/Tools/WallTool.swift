@@ -93,6 +93,12 @@ public final class WallTool: Tool {
     ctx.requestRender()
   }
 
+  /// The squiggle goes with the pointer; the vertices already placed stay,
+  /// because those are a shape half-drawn rather than a mark under a cursor.
+  public func pointerLeft() {
+    mouse = nil
+  }
+
   public func cancel() {
     points = []
     stroke = []

@@ -56,6 +56,12 @@ public final class MeasureTool: Tool {
     commit(a, here, ctx)
   }
 
+  /// The measuring line stops following the pointer; the first tap stays, and
+  /// keeps its own marker.
+  public func pointerLeft() {
+    mouse = nil
+  }
+
   public func cancel() {
     first = nil
     pressAt = nil

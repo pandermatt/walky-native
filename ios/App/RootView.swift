@@ -58,13 +58,13 @@ struct RootView: View {
                 stats: { DebugStats(fps: model.fps, tps: model.tps) })
 
       if let router {
-        TouchCanvas(router: router).ignoresSafeArea()
+        TouchCanvas(router: router, onCommand: { model.pressed($0) }).ignoresSafeArea()
       }
 
       // Above the map and the touch surface, below the chrome. Outside the
       // `chrome.hidden` check on purpose: it is not a control, and a clean
       // capture of a map still wants to say when the map is not finished yet.
-      if #available(iOS 26.0, *) {
+      if #available(iOS 26.0, macOS 26.0, *) {
         GeneratingBorder(generator: model.describer)
       }
 
@@ -87,22 +87,23 @@ struct RootView: View {
           SelectionBanner(selection: model.selection) { model.world.clearSelection() }
           CrowdBanner(crowd: model.crowd, toolbar: model.toolbar)
           Spacer()
+          // No switch here any more: the four that raise a sheet rather than
+          // edit the map are callbacks on the model, set in `onAppear`, so the
+          // menu bar an iPad's keyboard draws raises exactly what this bar does.
           ToolbarView(state: model.toolbar,
                       tint: model.world.settings.accent,
-                      onTool: { model.world.setTool(model.toolbar.selected == $0 ? nil : $0) },
-                      onAction: { action in
-                        switch action {
-                        // The two that raise a sheet, which the view owns.
-                        case .settings: sheet = .settings
-                        case .welcome: sheet = .welcome
-                        default: model.act(action)
-                        }
-                      })
+                      onTool: { model.toggleTool($0) },
+                      onAction: { model.act($0) })
         }
         .animation(.snappy(duration: 0.2), value: model.notice.message)
         .transition(.opacity)
       }
     }
+    .overlay {
+      RoutingOverlay(showing: model.routing.preparing,
+                     tint: model.world.settings.accent)
+    }
+    .animation(.snappy(duration: 0.25), value: model.routing.preparing)
     .animation(.snappy(duration: 0.25), value: model.chrome.hidden)
     .background(MapRenderer.color(model.world.settings.ground.background))
     .preferredColorScheme(windowScheme)
@@ -167,6 +168,10 @@ struct RootView: View {
     .onAppear {
       noteSystemScheme(scheme)
       if router == nil { router = PointerRouter(host: model.world) }
+      model.onOpenMap = { opening = true }
+      model.onSaveMap = { startSave() }
+      model.onSettings = { sheet = .settings }
+      model.onWelcome = { sheet = .welcome }
       model.start()
       // `WalkyWorld.init` restores the settings, and `model` is a `@State`
       // initial value, so the flag is already correct by the time this runs.
@@ -174,6 +179,19 @@ struct RootView: View {
     }
     .onDisappear { model.stop() }
     .onChange(of: model.world.settings.appearance) { _, _ in model.world.requestRender() }
+    // Apple's map is drawn light or dark by the snapshotter, so it has to be
+    // retaken when the ground changes under it. `refresh` answers immediately
+    // unless the lighting is actually wrong.
+    // The map is drawn from the ground's own palette, so a new ground means
+    // repainting what this app put on it -- otherwise a crowd placed on
+    // Classic stays at full strength on Paper, where it barely reads. See
+    // `WalkyWorld.restyle`.
+    .onChange(of: model.world.settings.ground.id) { _, _ in
+      model.world.restyle(to: model.world.settings.ground)
+    }
+    .onChange(of: model.world.settings.ground.isLight) { _, light in
+      model.basemap.refresh(dark: !light)
+    }
     .onChange(of: scenePhase) { _, phase in
       // The port of the web's visibilitychange handler: time spent in the
       // background is not owed, and resuming must not open on a burst of
@@ -195,7 +213,7 @@ struct RootView: View {
   /// `@available(iOS 26)` -- there is nothing to construct on an older phone,
   /// not even something that says so.
   private var describeSection: AnyView? {
-    guard #available(iOS 26.0, *) else { return nil }
+    guard #available(iOS 26.0, macOS 26.0, *) else { return nil }
     return AnyView(DescribeSceneSection(world: model.world, generator: model.describer,
                                        onStart: { sheet = nil }))
   }
@@ -212,12 +230,12 @@ struct RootView: View {
                           RealMapSection(world: model.world, basemap: model.basemap,
                                          importer: model.importer,
                                          locator: model.locator,
-                                         dark: (windowScheme ?? scheme) == .dark)),
+                                         dark: model.world.settings.ground.wantsDarkMap)),
                         roomSection: AnyView(
                           RoomScanSection(world: model.world, scanner: model.scanner,
                                           basemap: model.basemap,
                                           locator: model.locator,
-                                          dark: (windowScheme ?? scheme) == .dark,
+                                          dark: model.world.settings.ground.wantsDarkMap,
                                           // Swapping the item on the one sheet
                                           // rather than presenting from inside
                                           // it: `isCovered` stays one fact.

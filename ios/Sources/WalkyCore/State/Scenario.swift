@@ -145,6 +145,23 @@ public struct WallGeneratorRef: Sendable, Equatable {
   }
 }
 
+/// A door told which of its faces to send people out of, by the same wall index
+/// `WallGeneratorRef` uses.
+///
+/// Its own section rather than two more fields on `WallGeneratorRef`, which is
+/// what keeps the version 4 tail byte-identical: a build that predates this
+/// reads the flag it does not know and refuses the file by name, where a longer
+/// record would have been misparsed into nonsense.
+public struct DoorSideRef: Sendable, Equatable {
+  public var wallIndex: Int
+  /// The chosen face, as a unit vector from the door's middle.
+  public var facing: Point
+
+  public init(wallIndex: Int, facing: Point) {
+    self.wallIndex = wallIndex; self.facing = facing
+  }
+}
+
 /// Where the camera was pointing.
 public struct ScenarioView: Sendable, Equatable {
   public var targetX: Double
@@ -176,15 +193,21 @@ public struct ScenarioCore {
   /// the web wrote, and empty in anything this app wrote before generators
   /// became walls -- which is exactly when a file can stay at version 3.
   public var wallGenerators: [WallGeneratorRef]
+  /// Which of those doors have been told which face to use. Empty in
+  /// everything written before the feature existed, and in every map where the
+  /// goal still decides -- which is what lets such a map stay at version 4.
+  public var doorSides: [DoorSideRef]
 
   public init(version: Int = SCENARIO_VERSION, settings: Settings, view: ScenarioView,
               walls: [SerializedWall], agents: [SerializedAgent],
               labels: [SerializedLabel] = [], generators: [SerializedGenerator] = [],
-              wallGenerators: [WallGeneratorRef] = []) {
+              wallGenerators: [WallGeneratorRef] = [],
+              doorSides: [DoorSideRef] = []) {
     self.version = version; self.settings = settings; self.view = view
     self.walls = walls; self.agents = agents
     self.labels = labels; self.generators = generators
     self.wallGenerators = wallGenerators
+    self.doorSides = doorSides
   }
 }
 
