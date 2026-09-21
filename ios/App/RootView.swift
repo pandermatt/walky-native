@@ -160,7 +160,13 @@ struct RootView: View {
                           model: model,
                           tint: model.world.settings.accent,
                           onTool: { model.toggleTool($0) },
-                          onAction: { model.act($0) })
+                          onAction: { model.act($0) },
+                          // The console's tool row exists so that folding a
+                          // phone costs you no control. When the system has
+                          // stood a bar up beside it carrying all seven, that
+                          // is already true, and a second copy an inch away is
+                          // two places to look at one armed state.
+                          showsTools: barEdge == nil)
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
             // Taking the base rather than sitting at the bottom of it. The
@@ -263,19 +269,19 @@ struct RootView: View {
     // phone, an iPad or in any flat pose nothing about the layout moves.
     NavigationStack {
       layout
-        // `!hasBase` as well as the edge: the console owns the base when the
-        // phone is folded, and a system bar down the side of it would be the
-        // same tools twice. Today no folded pose reports an edge, so this
-        // changes nothing -- which is the point of stating it rather than
-        // relying on it.
-        .toolbar { if barEdge != nil, !hasBase, #available(iOS 27.1, *) {
+        // Wherever the system asks for it, folded or not. It used to be
+        // suppressed when the console was up, to stop the seven tools appearing
+        // twice -- but that left the strip the system had reserved sitting
+        // empty beside a console that had duplicated it. The tools come out of
+        // the console instead; see `showsTools` below.
+        .toolbar { if barEdge != nil, #available(iOS 27.1, *) {
           WalkyToolbar(state: model.toolbar,
                        tint: model.world.settings.accent,
                        onTool: { model.toggleTool($0) },
                        onAction: { model.act($0) })
         } }
         // The iOS 16 spellings, not the 18 ones: this target's floor is 17.
-        .toolbar(barEdge == nil || hasBase ? .hidden : .automatic, for: .navigationBar)
+        .toolbar(barEdge == nil ? .hidden : .automatic, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
     }
