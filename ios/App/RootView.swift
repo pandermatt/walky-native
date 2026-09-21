@@ -23,6 +23,14 @@ struct RootView: View {
   /// finger for every degree of hinge travel -- the bug `AppModel.tick`
   /// documents, wearing a third hat.
   @State private var divided = false
+  /// Which side the system wants bars on, or nil where it never puts them there.
+  ///
+  /// Read rather than decided: `toolbarVerticalEdge` is the system's own answer
+  /// for this scene, and taking it is what keeps Walky's bar agreeing with every
+  /// other app on the display instead of guessing from a width. See
+  /// `BarEdgeReader` at the foot of this file for why a custom bar gets to ask
+  /// at all.
+  @State private var barEdge: HorizontalEdge?
   @State private var sheet: Sheet?
   /// The two file sheets are the system's, not ours, so they are `Bool`s beside
   /// `sheet` rather than cases in it -- and `isCovered` is set from them too,
@@ -161,13 +169,23 @@ struct RootView: View {
             // your hands on rather than reach a thumb to.
             .frame(maxHeight: .infinity)
             .transition(.opacity)
-        } else {
-          ToolbarView(state: model.toolbar,
-                      tint: model.world.settings.accent,
-                      onTool: { model.toggleTool($0) },
-                      onAction: { model.act($0) })
-            .transition(.opacity)
         }
+      }
+    }
+    // The app's own bar, for every context the system does not take over.
+    //
+    // Kept exactly as it was -- the glass capsule and the armed pill that flows
+    // between cells -- because on an ordinary phone, an iPad or a Mac nothing
+    // about the bar needs to change. Where the system *does* want bars on a
+    // side, `nativeBar` below hands it the items instead and this is not built
+    // at all; the two are mutually exclusive by construction.
+    .overlay(alignment: .bottom) {
+      if !model.chrome.hidden, !hasBase, barEdge == nil {
+        ToolbarView(state: model.toolbar,
+                    tint: model.world.settings.accent,
+                    onTool: { model.toggleTool($0) },
+                    onAction: { model.act($0) })
+          .transition(.opacity)
       }
     }
     // Filling its half, rather than shrinking to the widest thing in it.
@@ -232,7 +250,35 @@ struct RootView: View {
   }
 
   var body: some View {
-    layout
+    // Unconditionally, and that is the point.
+    //
+    // The system will only stand a bar up on a side for items a navigation
+    // container owns, so there has to be one. Wrapping it in an `if` instead
+    // would put the *map* under a different ancestor whenever the Duo is opened
+    // or closed, which is a change of SwiftUI identity and would throw away
+    // `MapCanvas`'s `RenderCache` -- every wall path rebuilt to move a bar. One
+    // stack, always, and only the toolbar's contents vary.
+    //
+    // The bar itself is hidden unless the system is taking it over, so on a
+    // phone, an iPad or in any flat pose nothing about the layout moves.
+    NavigationStack {
+      layout
+        // `!hasBase` as well as the edge: the console owns the base when the
+        // phone is folded, and a system bar down the side of it would be the
+        // same tools twice. Today no folded pose reports an edge, so this
+        // changes nothing -- which is the point of stating it rather than
+        // relying on it.
+        .toolbar { if barEdge != nil, !hasBase, #available(iOS 27.1, *) {
+          WalkyToolbar(state: model.toolbar,
+                       tint: model.world.settings.accent,
+                       onTool: { model.toggleTool($0) },
+                       onAction: { model.act($0) })
+        } }
+        // The iOS 16 spellings, not the 18 ones: this target's floor is 17.
+        .toolbar(barEdge == nil || hasBase ? .hidden : .automatic, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+    }
       // Across the whole screen and across the bend on purpose, unlike the
       // routing spinner: it says *the app* is busy, not *the map* is busy, and
       // a border around only the standing half would say something narrower
@@ -253,9 +299,18 @@ struct RootView: View {
           }
         }
       }
+      // Zero-size, like the fold reader above it, so asking costs the layout
+      // nothing. Below 27.1 it is never built and `barEdge` stays nil, which is
+      // the horizontal bar this app has always drawn.
+      .background {
+        if #available(iOS 27.1, macOS 27.1, *) {
+          BarEdgeReader { barEdge = $0 }
+        }
+      }
     .animation(.snappy(duration: 0.25), value: model.routing.preparing)
     .animation(.snappy(duration: 0.25), value: model.chrome.hidden)
     .animation(.snappy(duration: 0.25), value: divided)
+    .animation(.snappy(duration: 0.25), value: barEdge)
     .background(MapRenderer.color(model.world.settings.ground.background))
     .preferredColorScheme(windowScheme)
     .statusBarHidden(model.chrome.hidden)
@@ -484,4 +539,25 @@ struct RootView: View {
 private enum Sheet: String, Identifiable {
   case welcome, settings, roomScan
   var id: String { rawValue }
+}
+
+/// What the system says about where bars belong.
+///
+/// Its own view because `@Environment(\.toolbarVerticalEdge)` is
+/// `@available(iOS 27.1, *)` and a stored property cannot be declared
+/// conditionally -- the same shape the fold reader uses for the same reason.
+///
+/// Walky has no navigation container in its main scene and so no bars for the
+/// system to place, which sounds like it should make this useless. It does not:
+/// the UIKit counterpart is a *trait*, and its header says it "reflects the
+/// system's preferred edge regardless of whether a vertical bar is currently
+/// visible". Nil means this context never uses one.
+@available(iOS 27.1, macOS 27.1, *)
+private struct BarEdgeReader: View {
+  @Environment(\.toolbarVerticalEdge) private var edge
+  let onChange: (HorizontalEdge?) -> Void
+
+  var body: some View {
+    Color.clear.onChange(of: edge, initial: true) { _, now in onChange(now) }
+  }
 }
