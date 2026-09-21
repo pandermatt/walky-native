@@ -121,63 +121,7 @@ struct ToolbarView: View {
   /// Everything you reach for occasionally, in one place.
   private var menuCell: some View {
     Menu {
-      Button { onAction(.undo) } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-        .disabled(!state.canUndo)
-      Button { onAction(.resetPedestrians) } label: {
-        Label("Reset pedestrians", systemImage: "arrow.counterclockwise")
-      }
-      Button { onAction(.resetZoom) } label: {
-        Label("Reset zoom", systemImage: "scope")
-      }
-      // With the other immediate actions rather than beside Settings, which is
-      // where the switch that shares this flag lives. The grouping is about
-      // what an item *does*: these three change the view now, the next two
-      // raise a sheet. Reaching it here is two taps against Settings' four,
-      // which for something you flip before a screenshot and back after is the
-      // difference between using it and not.
-      Button { onAction(.hideControls) } label: {
-        Label("Hide controls", systemImage: "eye.slash")
-      }
-      Divider()
-      // The one modal tool with no cell in the bar -- eight 44pt cells do not
-      // fit a 375pt phone. The armed state is carried by the icon swapping to a
-      // checkmark, because without it this would be the only mode you cannot
-      // see is armed. (A `Toggle` here draws nothing at all in a Menu on iOS 26,
-      // which is how this started as one.)
-      // Beside Measure, and in the menu for the same reason: eight 44pt cells do
-      // not fit a 375pt phone. Like Measure it carries its armed state in the
-      // icon, since it has no cell to light up.
-      // Both have a cell of their own on a Mac, where the bar has room for
-      // seven, so the menu does not carry them there -- an item that is also a
-      // lit button two inches away is a second place to look at the same
-      // state.
-      #if os(iOS)
-      Button { onTool(.generator) } label: {
-        Label(state.selected == .generator ? "Marking a generator" : "Generator",
-              systemImage: state.selected == .generator ? "checkmark" : "door.left.hand.open")
-      }
-      Button { onTool(.measure) } label: {
-        Label(state.selected == .measure ? "Measuring" : "Measure detour",
-              systemImage: state.selected == .measure ? "checkmark" : "ruler")
-      }
-      #endif
-      if state.hasMeasurement {
-        Button { onAction(.clearMeasurement) } label: {
-          Label("Clear measurement", systemImage: "ruler.fill")
-        }
-      }
-      Divider()
-      // Above Settings, in the group that is about the app rather than about
-      // the map, and well clear of the destructive item at the bottom.
-      Button { onAction(.welcome) } label: {
-        Label("Getting started", systemImage: "lightbulb")
-      }
-      Button { onAction(.settings) } label: { Label("Settings", systemImage: "gearshape") }
-      // Destructive last and marked as such, so the one irreversible item in
-      // the menu does not sit next to Undo looking like its neighbour.
-      Button(role: .destructive) { onAction(.clear) } label: {
-        Label("Clear map", systemImage: "trash")
-      }
+      ToolbarMenuItems(state: state, onTool: onTool, onAction: onAction)
     } label: {
       icon("ellipsis")
     }
@@ -206,7 +150,7 @@ struct ToolbarView: View {
   }
 }
 
-private extension View {
+extension View {
   /// The bar's own material.
   @ViewBuilder func glassBar(_ tint: Accent) -> some View {
     if #available(iOS 26.0, macOS 26.0, *) {

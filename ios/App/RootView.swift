@@ -11,6 +11,18 @@ struct RootView: View {
   /// The shared one, because a TV connected over AirPlay draws the same world.
   @State private var model = AppModel.shared
   @State private var router: PointerRouter?
+  /// Whether the screen is divided right now.
+  ///
+  /// This scene's own, and not the model's: `externalDisplays` lives on
+  /// `AppModel` because the loop reads it, whereas this is read only by this
+  /// body -- and a TV drawing the same world is not folded in any sense.
+  ///
+  /// Only *whether*, never the hinge angle. `ArrangementView` already places
+  /// the two halves, so the one thing left to decide is where the settings go,
+  /// and an angle up in this body would rebuild the toolbar underneath the
+  /// finger for every degree of hinge travel -- the bug `AppModel.tick`
+  /// documents, wearing a third hat.
+  @State private var divided = false
   @State private var sheet: Sheet?
   /// The two file sheets are the system's, not ours, so they are `Bool`s beside
   /// `sheet` rather than cases in it -- and `isCovered` is set from them too,
@@ -52,59 +64,198 @@ struct RootView: View {
     return settings.ground.isLight ? .light : .dark
   }
 
-  var body: some View {
+  /// Whether there is a base to put anything in.
+  ///
+  /// The fold's reserved region is active exactly while the phone is partially
+  /// open -- Apple's own note says so -- which makes this the same question as
+  /// "is it folded" with one fewer API in it, and no hinge observer at all.
+  ///
+  /// `chrome.hidden` is folded in here because it is the same decision: it puts
+  /// the app in a viewing mode, and a viewing mode has no controls to find a
+  /// home for.
+  private var hasBase: Bool { divided && !model.chrome.hidden }
+
+  /// The map and the fingers on it.
+  ///
+  /// A container, and it does not break the rule at the top of this file: what
+  /// that rule forbids is the canvas sitting inside something that *reads the
+  /// toolbar*. This reads neither.
+  ///
+  /// The two are together so that they are handed one rect by the arrangement
+  /// rather than two, which is what keeps `Viewport.screenToWorld` the exact
+  /// inverse of the canvas transform: the touch view reports points in its own
+  /// bounds and the renderer writes its own size into `world.viewport`, so the
+  /// two agree only while their frames match.
+  private var mapLayer: some View {
     ZStack {
       MapCanvas(world: model.world, redraw: model.redraw, basemap: model.basemap,
                 stats: { DebugStats(fps: model.fps, tps: model.tps) })
 
       if let router {
-        TouchCanvas(router: router, onCommand: { model.pressed($0) }).ignoresSafeArea()
+        TouchCanvas(router: router, onCommand: { model.pressed($0) })
       }
+    }
+    .ignoresSafeArea()
+    .overlay {
+      // Inside the map's half rather than over the whole screen, because what
+      // it is about is the map: a spinner centred across the bend belongs to
+      // neither half.
+      RoutingOverlay(showing: model.routing.preparing,
+                     tint: model.world.settings.accent)
+    }
+  }
 
-      // Above the map and the touch surface, below the chrome. Outside the
-      // `chrome.hidden` check on purpose: it is not a control, and a clean
-      // capture of a map still wants to say when the map is not finished yet.
-      if #available(iOS 26.0, macOS 26.0, *) {
-        GeneratingBorder(generator: model.describer)
-      }
-
-      // Everything the app draws over the map, gone in one place for a clean
-      // capture -- the notice and both banners as well as the bar, since a
-      // screenshot with a capsule floating in it is not a clean screenshot.
-      // Pinch and pan keep working while it is hidden, so the shot can still be
-      // framed; a tap on the map brings it all back.
+  /// Everything the app draws over the map.
+  ///
+  /// Gone in one place for a clean capture -- the notice and both banners as
+  /// well as the bar, since a screenshot with a capsule floating in it is not a
+  /// clean screenshot. Pinch and pan keep working while it is hidden, so the
+  /// shot can still be framed; a tap on the map brings it all back.
+  private var chromeLayer: some View {
+    // The `if` is inside, not around: this view is one half of an arrangement,
+    // and a half that stops existing is a half the arrangement has to relayout
+    // around. Emptied, it simply draws nothing.
+    VStack {
       if !model.chrome.hidden {
-        VStack {
-          if let notice = model.notice.message {
-            Text(notice)
-              .font(.footnote)
-              .padding(.horizontal, 14).padding(.vertical, 8)
-              .background(.ultraThinMaterial, in: Capsule())
-              .transition(.move(edge: .top).combined(with: .opacity))
-          }
-          // Child views on purpose -- see CrowdBanner. Neither count may be read
-          // in this body, which also builds the toolbar.
-          SelectionBanner(selection: model.selection) { model.world.clearSelection() }
-          CrowdBanner(crowd: model.crowd, toolbar: model.toolbar)
-          Spacer()
-          // No switch here any more: the four that raise a sheet rather than
-          // edit the map are callbacks on the model, set in `onAppear`, so the
-          // menu bar an iPad's keyboard draws raises exactly what this bar does.
+        if let notice = model.notice.message {
+          Text(notice)
+            .font(.footnote)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+        // Child views on purpose -- see CrowdBanner. Neither count may be read
+        // in this body, which also builds the toolbar.
+        SelectionBanner(selection: model.selection) { model.world.clearSelection() }
+        CrowdBanner(crowd: model.crowd, toolbar: model.toolbar)
+        Spacer()
+        // Two shapes for the same controls, and which one appears is the whole
+        // of what folding the phone changes. Flat, the bar floats over the map
+        // as it always has. Folded, the base is a surface in its own right and
+        // gets a console built for it -- see `TabletopConsole`, which also
+        // explains why the tools are still in it.
+        //
+        // A branch, and it is safe here in a way it would not be around the map:
+        // what it swaps is chrome, and chrome has no `RenderCache` to lose. The
+        // canvas above the crease is untouched by either arm.
+        //
+        // No switch on the actions in either arm: the four that raise a sheet
+        // rather than edit the map are callbacks on the model, set in
+        // `onAppear`, so the menu bar an iPad's keyboard draws raises exactly
+        // what these do.
+        if hasBase {
+          TabletopConsole(toolbar: model.toolbar,
+                          routing: model.routing,
+                          crowd: model.crowd,
+                          settings: model.world.settings,
+                          world: model.world,
+                          model: model,
+                          tint: model.world.settings.accent,
+                          onTool: { model.toggleTool($0) },
+                          onAction: { model.act($0) })
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
+            // Taking the base rather than sitting at the bottom of it. The
+            // banners keep their place just under the crease; everything left
+            // over goes to the tiles, which is the point of a surface you put
+            // your hands on rather than reach a thumb to.
+            .frame(maxHeight: .infinity)
+            .transition(.opacity)
+        } else {
           ToolbarView(state: model.toolbar,
                       tint: model.world.settings.accent,
                       onTool: { model.toggleTool($0) },
                       onAction: { model.act($0) })
+            .transition(.opacity)
         }
-        .animation(.snappy(duration: 0.2), value: model.notice.message)
-        .transition(.opacity)
       }
     }
-    .overlay {
-      RoutingOverlay(showing: model.routing.preparing,
-                     tint: model.world.settings.accent)
+    // Filling its half, rather than shrinking to the widest thing in it.
+    //
+    // The `ZStack` this used to sit in centred a narrow child; an arrangement
+    // aligns one to the leading edge instead, which slid the whole bar a
+    // quarter-screen to the left the first time the map went above the fold.
+    // Stated here rather than relied on, because it is the difference between
+    // "the bar is centred" and "the bar happens to be as wide as the screen".
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .animation(.snappy(duration: 0.2), value: model.notice.message)
+  }
+
+  /// The map and the chrome, placed.
+  ///
+  /// An **overlay** arrangement rather than a split one, because that is what
+  /// this app already was: a `ZStack` with the controls floating over the map.
+  /// Apple's own description of the style is the spec for what is wanted here
+  /// -- with no active division it draws the primary over the secondary, which
+  /// is today's layout exactly; with one it puts the primary in the part below
+  /// the fold and the secondary in the part above it. So the chrome is the
+  /// primary and the map is the secondary, and the tabletop pose falls out
+  /// without this file measuring anything.
+  ///
+  /// That is also why there is no `if folded` here. The arrangement is the same
+  /// view in both poses, so folding a phone resizes the two halves rather than
+  /// rebuilding them -- which is what keeps `MapCanvas`'s `RenderCache`, and
+  /// every wall path in it, alive across the fold.
+  ///
+  /// The `#available` branch is the one fork, and it forks by OS rather than by
+  /// pose: on a given device the same arm runs for the life of the process, so
+  /// nothing ever switches identity underneath the canvas. Below 27.1 there are
+  /// no folding phones, so the `ZStack` is not a degraded layout -- it is the
+  /// only layout that pose can have.
+  @ViewBuilder private var layout: some View {
+    if #available(iOS 27.1, macOS 27.1, *) {
+      ArrangementView {
+        chromeLayer
+      } secondary: {
+        mapLayer
+      }
+      .arrangementViewStyle(.overlay)
+    } else {
+      ZStack {
+        mapLayer
+        chromeLayer
+      }
     }
+  }
+
+  /// Whether a fold is dividing the screen, as the geometry sees it.
+  ///
+  /// Nil-safe by construction below 27.1: there is no folding phone there, so
+  /// the answer is false rather than unknown.
+  private func creased(_ proxy: GeometryProxy) -> Bool {
+    guard #available(iOS 27.1, macOS 27.1, *) else { return false }
+    // Queried without `.includeInactive`, which is the point: an inactive
+    // division is a crease that is not currently dividing anything -- a phone
+    // lying flat -- and counting one would put the settings in a base that is
+    // not there.
+    return !proxy.reservedRegions(kind: .division).isEmpty
+  }
+
+  var body: some View {
+    layout
+      // Across the whole screen and across the bend on purpose, unlike the
+      // routing spinner: it says *the app* is busy, not *the map* is busy, and
+      // a border around only the standing half would say something narrower
+      // than it means.
+      .overlay {
+        if #available(iOS 26.0, macOS 26.0, *) {
+          GeneratingBorder(generator: model.describer)
+        }
+      }
+      // A zero-size reader in the background, so asking the question costs the
+      // layout nothing. `.division` is the crease; `.occlusion` -- the camera
+      // housing -- is the system's problem, not ours, because every view Walky
+      // puts near it is one the system already insets.
+      .background {
+        GeometryReader { proxy in
+          Color.clear.onChange(of: creased(proxy), initial: true) { _, now in
+            divided = now
+          }
+        }
+      }
     .animation(.snappy(duration: 0.25), value: model.routing.preparing)
     .animation(.snappy(duration: 0.25), value: model.chrome.hidden)
+    .animation(.snappy(duration: 0.25), value: divided)
     .background(MapRenderer.color(model.world.settings.ground.background))
     .preferredColorScheme(windowScheme)
     .statusBarHidden(model.chrome.hidden)

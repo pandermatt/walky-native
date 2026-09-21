@@ -397,6 +397,9 @@ targets:
           - "WalkyApp.swift"
           - "RootView.swift"
           - "Input/TouchCanvas.swift"
+          # The base of a folded phone. A Mac window has no hinge, and
+          # `MacRootView` never builds one.
+          - "UI/TabletopConsole.swift"
           - "Render/ExternalDisplay.swift"
           - "State/MapShareSheet.swift"
           - "UI/AppIconSection.swift"
