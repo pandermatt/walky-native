@@ -1,0 +1,6 @@
+# Everything here is a static page with nothing behind it, so there is nothing
+# to keep a crawler out of. The one line that earns its keep is the sitemap.
+User-agent: *
+Allow: /
+
+Sitemap: https://walky.ch/sitemap.xml

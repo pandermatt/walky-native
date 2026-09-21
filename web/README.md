@@ -52,17 +52,65 @@ the accent is Walky's `#FFC800` and its `shadowOf` shade rather than that site's
 indigo, for the reason the section below gives. Its hero is not a screenshot but
 the real model, stepped in the page; see `src/landing/heroScene.ts`.
 
-The three phones on it are real screenshots, taken from `ios/` running on an
-iPhone 17 Pro simulator and committed to `public/screens/` as WebP at 570×1240
-— twice the ~250px the row renders them at. Each one is a different capability
-rather than the same picture in three colours, which is what the row was the
-first time it was built:
+The page carries two kinds of picture, and they come from different places.
 
-| File | Shows |
+**The App Store's own three**, in `public/screens/store-*.webp` at 921×2000.
+These are the shots submitted to Apple, and each one is a finished composition:
+its heading, its subtitle and its phone, on its own background colour. So the
+page adds nothing but a corner and that colour — sampled off the file, because a
+rounded corner clipped over white leaves a pale crescent on the navy one:
+
+| File | Card colour |
 |---|---|
-| `screen-draw.webp` | A drawn room and a painted crowd finding the goal, on the blueprint ground. |
-| `screen-measure.webp` | *Measure detour* over Zurich's old town, imported from `Rindermarkt, Zürich` at 380 m and **1:1**: Walky's route (orange) from Spitalgasse to Untere Zäune at 367 m, against 441 m on the pavements (blue), 1.20×. Taken at life size on purpose: at 1:10 the obstacle inflation seals every lane narrower than about 9 m, so in an old town Walky can only detour or find nothing, and the same two points measured 510 m against 449 m. |
-| `screen-import.webp` | Siena's Piazza del Campo, imported from `Piazza del Campo, Siena` at 380 m across and 1:10, with a crowd leaving the square for a goal to the north-west — away from the Palazzo Pubblico, which OpenStreetMap did not return as a building and a crowd would otherwise walk straight through. |
+| `store-create.webp` | `#E0F3EA` |
+| `store-simulate.webp` | `#F1F0EC` |
+| `store-explore.webp` | `#0D2043` |
+
+Two consequences of the headings being *inside* the picture. The section's own
+heading has to say something else, or every heading appears twice. And the
+`alt` text has to carry the baked-in words, because they are pixels and a screen
+reader cannot reach them — the numbered caption underneath is the page's only
+real, indexable sentence about each one.
+
+**One cropped map**, `public/images/map-uzh.webp` — Zurich's university quarter, imported and
+screenshotted from the app, then cropped to a wide band:
+
+```bash
+magick shot.webp -crop 1250x435+200+150 +repage -resize 1302x crop.png
+cwebp -q 84 -sharp_yuv crop.png -o public/images/map-uzh.webp
+```
+
+1302px wide is 2x the 651px the four-column tile renders at. 44KB.
+
+It is the background of that tile, behind a scrim that fades from the card's ground to nothing,
+so the copy sits on near-solid colour while the map runs free on the right. Below 900px the tile
+is too narrow to fade across and the scrim turns vertical.
+
+**That tile is the only dark card on the page, and it has to be.** The import is drawn on
+Apple's dark map, so a white scrim over it turns a navy full of colour into grey. The card takes
+the map's own ground instead — `--c-map-ground`, `rgb(40,48,66)` sampled off the file — and the
+copy goes light: heading at 12.1:1, body 7.4:1, the accent label 8.5:1, and the licence line,
+the weakest of them, at 5.0:1 measured over the brightest building the map contains.
+
+The scrim's stops are in **pixels from the bottom**, not percentages, in the vertical case. The
+copy wraps to four or five lines at phone widths and two at tablet, so a percentage stop lands
+somewhere different on every screen — which is how the licence line first ended up
+half-dissolved into a crowd of dots. A fixed band plus matching `padding-bottom` says the same
+thing at every height.
+
+It is an `<img>` under the copy rather than a CSS `background-image`, for the reason the
+`@font-face` is in the `<head>`: the stylesheet is emitted into `assets/` with a content hash,
+so a relative `url()` inside it resolves against `assets/` in the build and against the document
+in dev.
+
+**The phone screenshots are gone.** `screen-draw.webp` went when the grid was rebuilt;
+`screen-measure.webp` and `screen-import.webp` followed when the *Measure* and *Appearance*
+tiles were dropped and the map tile stopped needing a device around it. The page's only
+photography now is Apple's three plus the crop above. The real loss is the measure shot —
+*Measure detour* over Zurich's old town, Walky's 367 m from Spitalgasse to Untere Zäune
+against 441 m on the pavements, taken at **1:1** because at 1:10 the obstacle inflation seals
+every lane narrower than about 9 m and the same two points measure 510 m against 449 m. That
+capture is worth redoing if a tile ever wants it again; all three files are in the history.
 
 Two rules for picking a place, both learned by getting them wrong the first
 time:
@@ -75,12 +123,10 @@ time:
   platforms or a river. A picture of that is a picture of a limitation. Pick
   ground where every open space is somewhere a person can actually walk.
 
-**The numbers in the middle shot are not readable at the size the row shows it.**
-The app draws those labels at 13pt on a 402pt screen, which lands at about 8px
-once a phone is a third of a 984px column — texture, not information. So the
-caption carries them in the page's own type, and the picture carries the two
-routes, which do read. Any future shot whose point is a number needs the same
-treatment or a bigger slot.
+**A number inside a screenshot is not readable at the size a tile shows it.** The app draws
+the measure labels at 13pt on a 402pt screen, which lands at about 8px once a phone is a
+two-column tile — texture, not information. Any future shot whose point is a number has to
+have that number repeated in the page's own type, or be given a bigger slot.
 
 Retaking one:
 
