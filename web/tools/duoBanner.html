@@ -15,8 +15,9 @@
         background: #111; color: #ddd;
         font: 14px/1.5 system-ui, -apple-system, sans-serif;
       }
-      /* Shown at half size: the card is 1200 wide and a laptop is not. */
-      canvas { width: 600px; height: 315px; box-shadow: 0 0 0 1px #333; }
+      /* Shown at a sixth: the card is 3840 wide and a laptop is not. The
+         canvas element is sized in script, so only the CSS box is here. */
+      canvas { width: 640px; height: 360px; box-shadow: 0 0 0 1px #333; }
       button {
         font: inherit; padding: 8px 16px; border-radius: 8px;
         border: 1px solid #444; background: #222; color: #eee; cursor: pointer;
@@ -26,7 +27,7 @@
     </style>
   </head>
   <body>
-    <canvas id="card" width="1200" height="630"></canvas>
+    <canvas id="card" width="3840" height="2160"></canvas>
     <button id="save" disabled>Save to public/images/duo-banner.png</button>
     <p id="status">Drawing...</p>
     <script type="module" src="./duoBanner.ts"></script>
