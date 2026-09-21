@@ -147,6 +147,12 @@ struct TabletopConsole: View {
     let title: String
     let icon: String
     let keyPath: ReferenceWritableKeyPath<WalkyCore.Settings, Bool>
+    /// Whether the world has anything for this switch to show.
+    ///
+    /// Only Basemap has one: `MapRenderer` draws it solely when there is a
+    /// `geoAnchor`, so on a hand-drawn map the switch is a light with no bulb
+    /// behind it. Dimming it says that, where letting it toggle said nothing.
+    var isLive: (WalkyWorld) -> Bool = { _ in true }
     var id: String { title }
   }
 
@@ -156,7 +162,8 @@ struct TabletopConsole: View {
           keyPath: \.showLineToTarget),
     .init(title: "Space", icon: "circle.dashed", keyPath: \.showPersonalSpace),
     .init(title: "Debug", icon: "speedometer", keyPath: \.showDebug),
-    .init(title: "Map", icon: "map", keyPath: \.showBasemap),
+    .init(title: "Map", icon: "map", keyPath: \.showBasemap,
+          isLive: { $0.geoAnchor != nil }),
   ]
 
   /// The switches, in rows that fill.
@@ -171,7 +178,8 @@ struct TabletopConsole: View {
           ForEach(row) { toggle in
             ConsoleToggleTile(settings: settings, world: world, tint: tint,
                               title: toggle.title, icon: toggle.icon,
-                              keyPath: toggle.keyPath)
+                              keyPath: toggle.keyPath,
+                              isLive: toggle.isLive(world))
               .frame(maxWidth: .infinity)
           }
         }
@@ -380,9 +388,11 @@ private struct ConsoleToggleTile: View {
   let title: String
   let icon: String
   let keyPath: ReferenceWritableKeyPath<WalkyCore.Settings, Bool>
+  /// False when nothing in the world answers to this switch. See `ViewToggle`.
+  var isLive = true
 
   var body: some View {
-    let on = settings[keyPath: keyPath]
+    let on = settings[keyPath: keyPath] && isLive
     Button {
       settings[keyPath: keyPath].toggle()
       // `repaintingTheMap` covers three of these five and misses
@@ -405,6 +415,8 @@ private struct ConsoleToggleTile: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .disabled(!isLive)
+    .opacity(isLive ? 1 : 0.4)
     .accessibilityLabel(title)
     .accessibilityAddTraits(on ? [.isSelected] : [])
     .animation(.snappy(duration: 0.2), value: on)
@@ -436,7 +448,7 @@ private struct ConsoleReadout: View {
   /// The one-line version, for the base of a folded phone.
   private var line: some View {
     HStack {
-      stat(crowd.count.formatted(), "walkies")
+      stat(world.agents.walkingCount.formatted(), "walkies")
       Spacer()
       stat(world.metrics.totalArrived.formatted(), "arrived")
       Spacer()
@@ -465,7 +477,7 @@ private struct ConsoleReadout: View {
         Spacer()
       }
       .padding(.bottom, 2)
-      row(crowd.count.formatted(), "walkies")
+      row(world.agents.walkingCount.formatted(), "walkies")
       // The count above is who is still going: a spawned walky is taken out of
       // the crowd the moment it arrives, so without this the ones that got
       // where they were going simply vanish from the figures.

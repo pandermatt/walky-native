@@ -491,6 +491,22 @@ extension Agents {
     return n
   }
 
+  /// How many are still going.
+  ///
+  /// `count` is everybody the array holds, which stops meaning "the crowd" as
+  /// soon as a map mixes hand-painted walkies with generated ones: a generated
+  /// walky is taken out the moment it arrives, while a painted one stays put
+  /// with its `arrived` flag set. So the total falls for one kind and holds for
+  /// the other, and the number on screen was the sum of two different things.
+  ///
+  /// A scan, like `selectionCount`, and read once a second by the one view that
+  /// wants it.
+  public var walkingCount: Int {
+    var n = 0
+    for i in 0..<count where arrived[i] == 0 { n += 1 }
+    return n
+  }
+
   /// Whether every pedestrian with somewhere to be has got there.
   ///
   /// Pedestrians with no goal are not counted in either direction: one standing

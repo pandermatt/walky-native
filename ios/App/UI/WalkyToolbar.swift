@@ -142,5 +142,11 @@ struct WalkyToolbar: ToolbarContent {
       Label(command?.title ?? "", systemImage: command?.symbol ?? "questionmark")
     }
     .toggleStyle(.button)
+    // Only the armed one, and that is the point: `tint` colours the control
+    // whatever its state, so tinting all seven turned the whole strip yellow
+    // and told you nothing. On the lit tool it recolours the shape the system
+    // already draws for a selected toggle -- which is blue by default, and
+    // blue is not this app.
+    .tint(armed ? MapRenderer.color(tint.color) : nil)
   }
 }
