@@ -1088,3 +1088,61 @@ html[data-js] .reveal.is-visible {
 .footer-links { display: flex; flex-wrap: wrap; gap: var(--space-s); }
 .footer-links a { transition: color var(--transition); }
 .footer-links a:hover { color: rgba(var(--c-accent-ink), 1); }
+
+/*
+  §  Ready for iPhone Duo
+  ------------------------------------------------------------------
+  Copy beside a photograph, on the same dark band the engine section
+  uses. Two columns where there is room and one where there is not,
+  with the picture first when it stacks: the shape is the argument,
+  and a list of three poses under a wall of text is not.
+*/
+.duo-inner {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 480px);
+  gap: var(--space-xl);
+  align-items: center;
+}
+
+.duo-list {
+  list-style: none;
+  margin: var(--space-l) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-m);
+  max-width: var(--measure);
+}
+
+.duo-list h3 {
+  margin: 0 0 var(--space-3xs);
+  color: rgba(var(--c-band-text), 1);
+}
+
+.duo-list p {
+  margin: 0;
+  color: rgba(var(--c-band-text), 0.75);
+}
+
+/*
+  No card and no frame: the shot already carries a hand and a shadow,
+  and a rounded rectangle around it would read as a second device.
+*/
+.duo-figure {
+  margin: 0;
+}
+
+.duo-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (max-width: 900px) {
+  .duo-inner {
+    grid-template-columns: 1fr;
+    gap: var(--space-l);
+  }
+  /* The picture leads on a phone, where the copy would push it off-screen. */
+  .duo-figure { order: -1; }
+  .duo-figure img { max-width: 420px; margin-inline: auto; }
+}
