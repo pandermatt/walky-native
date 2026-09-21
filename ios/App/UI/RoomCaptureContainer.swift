@@ -39,15 +39,19 @@ struct RoomCaptureContainer: View {
       .navigationTitle(finishing ? "Building the plan…" : "Scan the room")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
+        // Both take an icon where the system stands the bar on a side, and stay
+        // words everywhere else -- see `SheetActionLabel`.
         ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") {
+          Button {
             scanner.cancelScan()
             dismiss()
+          } label: {
+            SheetActionLabel(title: "Cancel", symbol: "xmark")
           }
           .disabled(finishing)
         }
         ToolbarItem(placement: .confirmationAction) {
-          Button("Done") { finishing = true }
+          Button { finishing = true } label: { SheetActionLabel(title: "Done", symbol: "checkmark") }
             .disabled(finishing)
         }
       }
