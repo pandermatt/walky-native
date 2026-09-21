@@ -131,6 +131,26 @@ final class MapImporter {
   /// What was asked for, so a retry can ask again without anybody retyping it.
   private enum Request { case place(String), here }
   private var last: Request?
+
+  /// Whether there is something to ask for again.
+  ///
+  /// The retry has always existed; what was missing was any way for the view to
+  /// know it could offer one outside the it-looks-stuck case.
+  var canReimport: Bool { last != nil }
+
+  /// The area and ratio the map on screen was actually fetched at.
+  ///
+  /// Both settings are read *when the import runs*, so moving one afterwards
+  /// changes nothing you can see -- which is a trap unless the app says so.
+  /// Keeping what was used is what lets it: see `settingsMoved`.
+  private(set) var importedSideMetres: Double?
+  private(set) var importedScale: Double?
+
+  /// True when the sliders no longer describe the map they produced.
+  var settingsMoved: Bool {
+    guard let importedSideMetres, let importedScale else { return false }
+    return sideMetres != importedSideMetres || scale != importedScale
+  }
   private var task: Task<Void, Never>?
   private var watchdog: Task<Void, Never>?
 
@@ -310,6 +330,10 @@ final class MapImporter {
     // to know is how much of the earth is on it.
     let acrossM = anchor.metres((b?.maxX ?? 0) - (b?.minX ?? 0))
     progress = nil
+    // What this map *was* fetched at, so moving a slider afterwards can offer
+    // to fetch it again rather than silently doing nothing.
+    importedSideMetres = sideMetres
+    importedScale = scale
     phase = .done("""
       \(polygons.count) buildings, \(corners.formatted()) corners, \
       \(Int(acrossM))m across at 1:\(Int(anchor.scale)).

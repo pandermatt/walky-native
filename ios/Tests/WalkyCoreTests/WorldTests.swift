@@ -183,3 +183,36 @@ struct WorldEditTests {
     #expect(world.walls[0].isGoal == false)
   }
 }
+
+/// The revision split, which exists so a renderer can cache wall geometry and
+/// is only worth anything if the crowd stops invalidating it.
+@MainActor
+@Suite("Painting does not move the map")
+struct CrowdRevisionTests {
+  @Test("a placed crowd bumps the agents, not the walls")
+  func paintingKeepsTheWallCache() {
+    let world = WalkyWorld()
+    world.settings.defaults = nil
+    world.addWallShape([rectanglePolygon(Point(200, 200), Point(300, 300))], nil)
+    let walls = world.worldRevision
+    let agents = world.agentRevision
+
+    world.addPedestrians(Point(0, 0))
+
+    // `worldRevision` is the renderer's wall-cache key, and rebuilding that
+    // cache runs `groupWalls` -- 8.6 ms on a 200-block map against 0.011 ms
+    // for the placement itself. The brush commits on every pointer event, so
+    // this is the difference between painting and stuttering.
+    #expect(world.worldRevision == walls, "painting invalidated the wall cache")
+    #expect(world.agentRevision != agents)
+  }
+
+  @Test("but drawing a wall still does")
+  func drawingMovesBoth() {
+    let world = WalkyWorld()
+    world.settings.defaults = nil
+    let walls = world.worldRevision
+    world.addWallShape([rectanglePolygon(Point(0, 0), Point(80, 80))], nil)
+    #expect(world.worldRevision != walls)
+  }
+}

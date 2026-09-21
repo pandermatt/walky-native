@@ -22,6 +22,10 @@ public protocol PointerHost: AnyObject {
   /// touch -- there is no hover, and a ghost parked at the last touch point is
   /// exactly the artefact to avoid.
   var mouseWorld: Point? { get set }
+  /// Where a pointer is hovering with no button down. Nil on iOS always: only
+  /// `hovered(at:)` writes it, and a touchscreen never hovers. What it gates is
+  /// chrome that can only be clicked by something with a cursor.
+  var hoverWorld: Point? { get set }
   func requestRender()
   /// A one-finger drag with no tool armed. Whether that is worth saying
   /// anything about is the host's business, not the router's -- the router
@@ -32,7 +36,10 @@ public protocol PointerHost: AnyObject {
   /// drag pans and a second finger pinches. That is what makes it safe to hang
   /// "bring the controls back" on, and the router stays ignorant of what the
   /// host does with it.
-  func tappedWithoutTool()
+  /// The point it landed on, because by now some of them hit something: a
+  /// doorstep control is clicked by an idle tap, and the host has to be able to
+  /// tell that from a tap on bare ground.
+  func tappedWithoutTool(at: Point)
 }
 
 /// The pointer and gesture state machine, ported from `app.ts:457–720`.
@@ -203,7 +210,7 @@ public final class PointerRouter {
     host.tool?.onPointerUp(e, host.toolContext)
     if idle, let press,
        jsHypot(screen.x - press.x, screen.y - press.y) <= Self.TAP_SLOP {
-      host.tappedWithoutTool()
+      host.tappedWithoutTool(at: e.world)
     }
     lastScreen = nil
     // There is no hover on iOS: once the finger is gone the ghost should be too.
@@ -221,6 +228,7 @@ public final class PointerRouter {
     host.tool?.cancel()
     lastScreen = nil
     host.mouseWorld = nil
+    host.hoverWorld = nil
     host.requestRender()
   }
 
@@ -229,6 +237,105 @@ public final class PointerRouter {
     host.tool?.onDoubleTap(e, host.toolContext)
     host.requestRender()
   }
+
+  // MARK: - A pointer that is not a finger
+
+  /// The pointer moving with no button down.
+  ///
+  /// A Mac has a hover where a touchscreen has nothing at all, and the tools
+  /// were written for a mouse first: `app.ts` sends `pointermove` whether or
+  /// not a button is down, every tool guards its drag on `e.buttons != 0`, and
+  /// what that buys is the ghost of the shape you are about to draw following
+  /// the cursor. On iOS that path was simply never taken. Here it is, which is
+  /// why the buttons are 0: a tool that mistook this for a drag would paint a
+  /// line of pedestrians from wherever the cursor last rested.
+  public func hovered(at screen: Point) {
+    // A button *is* down, so this is a drag and `moved` owns it.
+    guard pointers.isEmpty else { return }
+    let e = info(screen, buttons: 0)
+    host.mouseWorld = e.world
+    host.hoverWorld = e.world
+    host.tool?.onPointerMove(e, host.toolContext)
+    lastScreen = screen
+    host.requestRender()
+  }
+
+  /// The pointer leaving the map. Clearing `mouseWorld` is what takes the ghost
+  /// with it -- see the cursor ghost in `MapRenderer`, which is drawn only
+  /// where there is a pointer to draw it under.
+  public func hoverEnded() {
+    guard pointers.isEmpty else { return }
+    lastScreen = nil
+    host.mouseWorld = nil
+    host.hoverWorld = nil
+    // The tool is told, where clearing `mouseWorld` used to be the whole of it:
+    // that gates the cursor ghost and nothing else, so the pedestrian block and
+    // the goal's fan of lines stayed drawn at the point the pointer left.
+    host.tool?.pointerLeft()
+    host.requestRender()
+  }
+
+  /// A scroll wheel, in notches, about a point: `ZoomMouseListener`'s own
+  /// gesture, arriving on the platform it was written for.
+  public func scrolled(at screen: Point, notches: Double) {
+    guard notches.isFinite, notches != 0 else { return }
+    host.viewport.zoomAt(screen, notches)
+    host.requestRender()
+  }
+
+  /// A two-finger scroll, as a screen-space delta. The sign is the caller's
+  /// business -- a Mac's natural-scrolling switch is not the router's to read.
+  public func panned(by dxScreen: Double, _ dyScreen: Double) {
+    guard dxScreen != 0 || dyScreen != 0 else { return }
+    host.viewport.panBy(dxScreen, dyScreen)
+    host.requestRender()
+  }
+
+  // MARK: - Gestures that arrive without fingers
+
+  /// A pinch reported as a ratio rather than measured from two touches.
+  ///
+  /// The whole of why this exists: a Mac has no fingers on the glass. An iPad
+  /// app on a Mac gets a trackpad pinch as a *recognised gesture*, and its
+  /// `touchesBegan` never sees a second touch at all -- so `measurePinch`, and
+  /// with it every zoom and every twist, simply never happened there. The
+  /// arithmetic is the same either way; only where the numbers come from
+  /// differs, which is why this hands them to the same `Viewport` calls the
+  /// two-finger branch of `moved` uses.
+  ///
+  /// Reported as the change since the last call, not as the total since the
+  /// gesture began, so the caller resets its recogniser each time and the
+  /// camera stays a running sum -- the shape `rotateBy` and `zoomByRatio`
+  /// already expect.
+  public func pinched(at screen: Point, by ratio: Double) {
+    guard !ownsGesture else { return }
+    host.viewport.zoomByRatio(screen, ratio)
+    host.requestRender()
+  }
+
+  /// A twist reported the same way, in radians since the last call.
+  ///
+  /// No `ROTATE_SLOP` here, and that is deliberate: the slop exists because two
+  /// fingers pinching are never quite parallel to where they started, and a
+  /// recogniser that has already decided this is a rotation has applied a
+  /// threshold of its own. `snapNorth` on the lift still settles it straight.
+  public func twisted(at screen: Point, by radians: Double) {
+    guard !ownsGesture else { return }
+    host.viewport.rotateBy(screen, radians)
+    host.requestRender()
+  }
+
+  /// The end of a recognised pinch or twist: where a map left a degree off
+  /// straight is put straight, exactly as the last finger of a pinch does it.
+  public func indirectGestureEnded() {
+    guard !ownsGesture else { return }
+    if host.viewport.snapNorth() { host.requestRender() }
+  }
+
+  /// Whether the fingers already have this gesture. Two of them on the glass
+  /// are driving the map through `moved`, and a recogniser watching the same
+  /// two would zoom it a second time.
+  private var ownsGesture: Bool { pointers.count >= 2 }
 
   private func measurePinch() -> (gap: Double, mid: Point, angle: Double)? {
     guard pointers.count >= 2 else { return nil }

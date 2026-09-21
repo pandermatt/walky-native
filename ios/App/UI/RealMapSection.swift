@@ -12,9 +12,15 @@ import WalkyGeo
 /// **Two sections, because there are two questions.** It used to be one, with a
 /// text field, a location button, an area slider, a scale picker, a caution and
 /// a progress line all in a stack, and the thing you had to do first was the
-/// hardest to find. Where you want the map is a decision; how big and at what
-/// ratio is a setting you touch once and forget. Splitting them means the first
-/// section is two obvious ways to say *where* and nothing else.
+/// hardest to find. How big and at what ratio is a setting; where you want the
+/// map is the decision that acts on it.
+///
+/// In that order, and the order is load-bearing rather than tidy: both settings
+/// are read *at the moment the import runs*, so one changed afterwards changes
+/// nothing -- the map you already have keeps the area and the ratio it was
+/// fetched at. With the search on top, the natural thing to do was type a
+/// place, press Search, then find the scale and move it, and wonder why the
+/// map did not change.
 struct RealMapSection: View {
   let world: WalkyWorld
   let basemap: Basemap
@@ -24,8 +30,14 @@ struct RealMapSection: View {
 
   var body: some View {
     Group {
-      where_
+      // The settings first, and the order is the whole point: both of them are
+      // read *when the import runs*, so a scale changed afterwards changes
+      // nothing you can see and the map you already fetched keeps the ratio it
+      // was fetched at. Putting the search first invited exactly that -- type a
+      // place, press Search, then notice the scale and change it, to no effect.
+      // A control that has to be set before the button is above the button.
       settings
+      where_
     }
   }
 
@@ -35,9 +47,13 @@ struct RealMapSection: View {
     Section {
       HStack {
         TextField("Place or address", text: $importer.query)
+          // Both of these are a software keyboard's business, and a Mac has
+          // none: a hardware keyboard capitalises what you type.
+          #if os(iOS)
           .textInputAutocapitalization(.words)
-          .autocorrectionDisabled()
           .submitLabel(.search)
+          #endif
+          .autocorrectionDisabled()
           .onSubmit(search)
         // Named for what it does rather than for what it starts. "Import" is
         // the machine's word for the whole operation; "Search" is the word for
@@ -159,6 +175,25 @@ struct RealMapSection: View {
       if let caution = importer.scaleCaution {
         Label(caution, systemImage: "exclamationmark.triangle.fill")
           .font(.footnote).foregroundStyle(.orange)
+      }
+
+      // Offered here, where the change was just made, rather than beside the
+      // search field: moving one of these is the thing that makes it stale,
+      // and the answer belongs next to the question.
+      //
+      // It says the figures it would use, because the map on screen was
+      // fetched at different ones and "Import again" alone would not say which
+      // set wins. The work itself already existed -- `retry` re-runs the last
+      // request and reads both settings fresh; all that was missing was a
+      // reason to show it.
+      if importer.canReimport && importer.settingsMoved {
+        Button {
+          importer.retry(locator, into: world, basemap: basemap, dark: dark)
+        } label: {
+          Label("Import again at \(Int(importer.sideMetres)) m, 1:\(Int(importer.scale))",
+                systemImage: "arrow.clockwise")
+        }
+        .disabled(importer.isBusy)
       }
     } header: {
       Text("Area and scale")

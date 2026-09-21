@@ -91,7 +91,7 @@ struct WelcomeSheetView: View {
 
   /// Filled and tinted, as the one thing on the screen to press.
   ///
-  /// No `#available(iOS 26.0, *)` here, unlike the toolbar's glass: a bar has to
+  /// No `#available(iOS 26.0, macOS 26.0, *)` here, unlike the toolbar's glass: a bar has to
   /// opt into a material and carry its own fallback, while `.borderedProminent`
   /// is a *system style* and draws itself as whatever the running OS draws
   /// buttons as. The label colour is asked of the accent rather than fixed

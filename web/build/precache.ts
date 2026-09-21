@@ -13,8 +13,19 @@ export const SW_FILE = 'sw.js';
 /**
  * Files the host consumes rather than serves, or that no browser ever requests.
  * `_headers` and `_redirects` are Cloudflare Pages control files.
+ *
+ * `robots.txt` and `sitemap.xml` are crawler files. No page ever fetches them,
+ * so precaching them buys nothing offline and costs twice: two entries in every
+ * client's cache, and a new worker version every time a `lastmod` date moves.
+ *
+ * `og.png` is the link-preview card. It is 300KB, no page has ever shown it,
+ * and the only things that fetch it are Slack's and X's scrapers -- which are
+ * not the browser and never see this cache. Precaching it made every offline
+ * install pay for a picture none of its users can reach.
  */
-const SKIP = new Set(['_headers', '_redirects', '.DS_Store']);
+const SKIP = new Set([
+  '_headers', '_redirects', '.DS_Store', 'robots.txt', 'sitemap.xml', 'og.png',
+]);
 
 const stripLeadingSlash = (path: string) => path.replace(/^\.?\//, '');
 

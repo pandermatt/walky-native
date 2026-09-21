@@ -1,7 +1,7 @@
 {
-  "name": "Walky — Pedestrian Simulator",
-  "short_name": "Walky",
-  "description": "Draw walls, mark a goal, paint a crowd, and watch it find its way. Runs entirely in the browser.",
+  "name": "Walky Lite — Pedestrian Simulator",
+  "short_name": "Walky Lite",
+  "description": "Draw walls, mark a goal, paint a crowd, and watch it find its way. The whole simulation, running in the browser with nothing to install.",
   "id": "./",
   "start_url": "./demo/",
   "scope": "./",

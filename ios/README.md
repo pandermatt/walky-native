@@ -1,8 +1,9 @@
-# Walky for iOS
+# Walky for iOS and macOS
 
 A native Swift port of the simulation in `../web/src/sim` and `../web/src/state`,
-and
-(from Phase 3) a SwiftUI + Metal app around it.
+and (from Phase 3) a SwiftUI + Metal app around it — on the phone, and on the
+Mac as a target of its own. See **The Mac app** below for what the two share,
+which is nearly everything.
 
 ## Why this is a package and not just an app target
 
@@ -27,6 +28,132 @@ broken.
 
 Without a runtime the app can still be *compiled*; see the comment at the top of
 `project.yml` for the flags that takes and why each is needed.
+
+## The Mac app
+
+`WalkyMac` is a **native macOS target**, not Catalyst and not "Designed for
+iPad":
+
+```bash
+xcodegen generate
+xcodebuild build -project Walky.xcodeproj -scheme WalkyMac
+```
+
+The port is what makes a second platform cheap. Everything that is not pixels
+is already in `WalkyCore` — the camera, the tools, the world and its undo, and
+`PointerRouter`, which is a state machine over *points* and has never heard of
+`UITouch` — and `MapRenderer` draws through SwiftUI's `GraphicsContext`, which
+is the same type on both platforms. So the Mac target shares all of that plus
+every view in `App/UI` that is neither a finger nor a camera, and adds one
+folder:
+
+| `Mac/` | |
+| --- | --- |
+| `WalkyMacApp.swift` | `@main`, the window and the `Settings` scene — which is where ⌘, comes from. |
+| `MacRootView.swift` | The window's contents: map, pointer surface, the same floating bar the phone wears. |
+| `MacCanvas.swift` | The only file here that knows what a mouse is. `NSEvent` → the router's calls. |
+| `MacCommands.swift` | The menu bar. Nothing new, the same actions where a Mac looks for them. |
+| `MacShell.swift` | The window state the menu bar also has to reach. |
+| `MacSettingsView.swift` | The same settings pages, as a Mac's tabbed Settings window rather than the phone's drill-down sheet. |
+
+What the Mac brings that a touchscreen does not, all of it handled in
+`MacCanvas` and answered by four entry points on `PointerRouter`:
+
+- **A hover** — a pointer with no button down, so the tool ghosts follow the
+  cursor the way they do on the web, where `app.ts` sends `pointermove`
+  whether or not a button is held.
+- **Gestures that arrive already recognised** — a trackpad pinch or twist is an
+  `NSEvent`, never a second touch. The same `pinched`/`twisted` entry points an
+  iPad app on a Mac uses.
+- **A scroll wheel** — two-finger scrolling pans, a wheel zooms (⌘ or ⌃ zooms
+  either way). `ZoomMouseListener`'s own gesture, back on the platform it was
+  written for.
+
+Two features are absent rather than disabled, which is the rule the settings
+sheet already follows for a phone without a LiDAR camera: **scanning a room**
+(RoomPlan needs a camera no Mac has) and **alternate app icons** (an iOS
+affordance). Sharing a map is the Finder's job here — save the `.walky` and
+hand over the file.
+
+It is **sandboxed** (`Mac/Walky.entitlements`): the panels' files, the network
+for Apple's tiles and OpenStreetMap, and location when you ask for the map
+around you. There is no development team in `project.yml`, so a local build
+signs to run locally, exactly as the phone target does.
+
+The target's floor is **macOS 26**, where every other target here starts at the
+oldest OS it can. The difference is installed base: the phone app has one and
+this does not, and starting at 26 is what lets the shared chrome — the
+toolbar's glass, the generating border — be one design on both platforms
+instead of the Mac carrying a second, older one.
+
+## Keyboard shortcuts
+
+On the Mac and on an iPad with a hardware keyboard, from one table in
+`Sources/WalkyCore/Commands.swift`:
+
+| | | | |
+|---|---|---|---|
+| `1` Wall | `2` Rectangle | `3` Border | `4` Pedestrians |
+| `5` Mark goal | `6` Generator | `7` Measure detour | `esc` Put the tool down |
+| `Space` Play / pause | `⌘Z` Undo | `⌘0` Reset zoom | `⌘.` Hide controls |
+| `⌘O` Open map | `⌘S` Save map | `⇧⌘⌫` Clear map | `⌘,` Settings |
+
+The digits count the cells you can see on the bar — five on the strip, then the
+two in the overflow menu. The web app numbers its own strip the same way and
+lands on different digits because it has tools this port does not: the rule
+travels, the numbers do not.
+
+Three readers, one table: the bar's cells, the menu bar (`App/WalkyCommands.swift`,
+attached by *both* apps) and the printed list under Settings ▸ Keyboard
+shortcuts. That is the web's argument, ported with the table —
+`web/src/ui/toolbar.ts` derives its `SHORTCUTS` from the button table because
+"a list of them kept somewhere else is a list that goes wrong the first time a
+tool moves". This port had already proved it: the bar said "Mark goal" and the
+Mac menu said "Mark Goal".
+
+Two things split by platform, for one reason each:
+
+- **Bare keys are not menu items.** A key equivalent with no modifier is
+  reliable on a Mac and is not on iPadOS, so the digits, Space and Escape are
+  answered by the input views (`WalkyTouchView.keyCommands`,
+  `WalkyPointerView.keyDown`) and everything carrying ⌘ is the menu bar's.
+- **They go quiet while anything covers the map** (`AppModel.pressed`). Both of
+  Walky's text fields live inside Settings, and somebody typing "5th Avenue"
+  into the place search means the digit.
+
+## Closing one side of a door
+
+A door is a wall carrying a `Generator`, so **nobody ever walks through one**:
+the only way a crowd reaches the wrong side of a doorway is by *appearing*
+there. `generatorMouth` puts them on the side the goal is on, which on a floor
+plan can be the room when you wanted the corridor.
+
+So a door may carry a `closedFacing` — one unit vector, the single piece of
+judgement the geometry does not contain. The mouth stays derived: the goal
+direction is **reflected** across the closed face rather than reversed, so a
+crowd headed north-east still leaves pointing north-east, from the other
+doorstep.
+
+On macOS, hover a door with no tool in hand and a cap appears on each of its
+two doorsteps — *the two candidate mouths*, literally where people would land,
+so what you see is what you get. Click one to close it; the closed side is
+drawn as a solid bar whether or not you are pointing at it. Closing the side a
+door is using moves its crowd; closing the one already closed opens it; closing
+the other one moves the seal, so both-closed is unrepresentable.
+
+Three properties worth knowing, each of which a geometry-based seal would lose:
+
+- **Nothing goes stale.** A sealing panel sized against `pedestrianRadius`
+  quietly unseals when that slider moves.
+- **The demand is untouched.** A door's arrival schedule is hashed on its
+  middle, so moving its geometry reshuffles it and the map stops being A/B-able.
+- **No navigation rebuild.** Not one wall corner moves, so the O(n^2.5) rebuild
+  — 2.1s on a 600m import — is not owed.
+
+It costs one flag bit and codec **version 5**, the same shape version 4 already
+used: one more trailing section, so a map with both sides open is written byte
+for byte as before, and an older build refuses a newer file by name rather than
+misreading its tail.
 
 ## The sticker pack
 

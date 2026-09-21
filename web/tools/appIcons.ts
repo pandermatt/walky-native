@@ -57,6 +57,22 @@ function pedestrian(cx: number, cy: number, r: number, fill: RGB, ring: number):
  * three tangent circles read as a diagram rather than as a crowd. Geometry is
  * derived from `reach` so the whole cluster scales as one.
  */
+/**
+ * How far the two behind are nudged apart, and the leader down.
+ *
+ * Not a new idea: it is the app icon's own composition. `ios/App/Walky.icon` was
+ * opened in Icon Composer and the three layers were moved to +-25.89pt with the
+ * leader at -3.42pt, on that bundle's 1024 canvas. This box is 512, so both
+ * halve. Keeping the numbers here rather than rounding them is what lets the
+ * two marks be compared and found to agree.
+ *
+ * The colours are deliberately NOT taken from that edit. It recoloured the
+ * walkers to Apple's system palette; the mark on this side stays MAGENTA, TEAL
+ * and LIME, which are Walky's own and are what a wall on the map can come out.
+ */
+const SPREAD = 25.89 / 2;
+const LEAD_DROP = 3.42 / 2;
+
 function crowd(reach: number): string {
   // Solving reach = R + r + ring/2 with the spacing that gives a snug cluster
   // (centres about 1.7 radii apart, so R sqrt(3) = 1.7 r).
@@ -69,9 +85,9 @@ function crowd(reach: number): string {
   // The two behind first, the leader over them -- the same order the crowd
   // would land in if it were walking up the page.
   return [
-    at(CENTRE - dx, CENTRE + dy, TEAL),
-    at(CENTRE + dx, CENTRE + dy, LIME),
-    at(CENTRE, CENTRE - R, MAGENTA),
+    at(CENTRE - dx - SPREAD, CENTRE + dy, TEAL),
+    at(CENTRE + dx + SPREAD, CENTRE + dy, LIME),
+    at(CENTRE, CENTRE - R - LEAD_DROP, MAGENTA),
   ].join('\n  ');
 }
 

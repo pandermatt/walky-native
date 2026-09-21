@@ -12,17 +12,7 @@ import { unpackRgb } from '../sim/agents';
 import { toCss, WHITE } from '../palette';
 import { buildHeroScene, FRAME, MAX_TICKS, RADIUS, STILL_TICKS } from './heroScene';
 import { forwardTarget } from './forward';
-
-/**
- * The App Store listing, once there is one.
- *
- * There is not yet, so the button ships saying so rather than linking nowhere.
- * Making it live is this constant plus dropping `is-pending` from the markup in
- * index.html -- and it is a constant rather than an href in the HTML so that
- * "where is the App Store link" has one answer.
- */
-// TODO: set once the listing is published, then unmute the button in index.html.
-export const APP_STORE_URL: string | null = null;
+import { checkStoreLinks } from './store';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Share links that predate the move
@@ -200,6 +190,7 @@ function installHero(): void {
 /* ───────────────────────────────────────────────────────────────────────────── */
 
 if (!forward) {
+  checkStoreLinks();
   installReveal();
   installHero();
 }

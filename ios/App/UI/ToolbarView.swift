@@ -48,16 +48,26 @@ struct ToolbarView: View {
   /// dark over a dark map and light over a pale wall, the way a tab bar is.
   /// The mapping keeps the originals' sense -- a scribble for the freehand
   /// wall, a filled block against a hollow frame, a target for the goal.
-  private let tools: [(ToolId, String, String)] = [
-    (.wall, "scribble", "Wall"),
-    (.rectangle, "rectangle.fill", "Rectangle"),
-    (.border, "square", "Border"),
-    (.pedestrian, "person.3.fill", "Pedestrians"),
-    (.goal, "target", "Mark goal"),
-  ]
+  /// A Mac shows all seven tools; a phone shows the five that fit and files
+  /// the other two in the menu. One list either way, so a digit means the same
+  /// thing on both -- see `Command.tools`.
+  #if os(macOS)
+  private static let onTheBar = Command.tools
+  #else
+  private static let onTheBar = Command.barTools
+  #endif
+
+  /// Read from the table rather than written out here, which is what keeps
+  /// this bar, the menu bar and the printed list in Settings agreeing about
+  /// what a tool is called and which digit arms it. They had already drifted:
+  /// this said "Mark goal" and the Mac's menu said "Mark Goal".
+  private let tools: [(ToolId, String, String)] = Self.onTheBar.compactMap {
+    guard let command = Command.of($0) else { return nil }
+    return ($0, command.symbol, command.title)
+  }
 
   var body: some View {
-    if #available(iOS 26.0, *) {
+    if #available(iOS 26.0, macOS 26.0, *) {
       GlassEffectContainer(spacing: 6) {
         bar
       }
@@ -137,6 +147,11 @@ struct ToolbarView: View {
       // Beside Measure, and in the menu for the same reason: eight 44pt cells do
       // not fit a 375pt phone. Like Measure it carries its armed state in the
       // icon, since it has no cell to light up.
+      // Both have a cell of their own on a Mac, where the bar has room for
+      // seven, so the menu does not carry them there -- an item that is also a
+      // lit button two inches away is a second place to look at the same
+      // state.
+      #if os(iOS)
       Button { onTool(.generator) } label: {
         Label(state.selected == .generator ? "Marking a generator" : "Generator",
               systemImage: state.selected == .generator ? "checkmark" : "door.left.hand.open")
@@ -145,6 +160,7 @@ struct ToolbarView: View {
         Label(state.selected == .measure ? "Measuring" : "Measure detour",
               systemImage: state.selected == .measure ? "checkmark" : "ruler")
       }
+      #endif
       if state.hasMeasurement {
         Button { onAction(.clearMeasurement) } label: {
           Label("Clear measurement", systemImage: "ruler.fill")
@@ -193,7 +209,7 @@ struct ToolbarView: View {
 private extension View {
   /// The bar's own material.
   @ViewBuilder func glassBar(_ tint: Accent) -> some View {
-    if #available(iOS 26.0, *) {
+    if #available(iOS 26.0, macOS 26.0, *) {
       // Untinted, so it adapts to whatever the map puts behind it -- dark over
       // the #1E1E1E ground, and picking up the colour of a wall that passes
       // beneath. An opaque pane or a heavy tint would leave the effect nothing
@@ -222,7 +238,7 @@ private extension View {
   /// container*, so it merges with the bar rather than floating over it -- the
   /// thing the container exists for.
   @ViewBuilder func armed(_ on: Bool, _ tint: RGB, in namespace: Namespace.ID) -> some View {
-    if #available(iOS 26.0, *) {
+    if #available(iOS 26.0, macOS 26.0, *) {
       // Only the armed tool gets a shape. Giving every cell a `.tint(.clear)`
       // glass circle still draws a circle -- seven of them, which reads as
       // noise. A tab bar shapes the selected item and leaves the rest bare.

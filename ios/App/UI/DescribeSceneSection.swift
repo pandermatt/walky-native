@@ -9,7 +9,7 @@ import WalkyCore
 /// because Apple Intelligence needs both an iOS 26 phone and a capable one. So
 /// the reason takes the place of the controls rather than appearing under them:
 /// a text field that cannot do anything is worse than no text field.
-@available(iOS 26.0, *)
+@available(iOS 26.0, macOS 26.0, *)
 struct DescribeSceneSection: View {
   let world: WalkyWorld
   @Bindable var generator: SceneGenerator

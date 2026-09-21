@@ -1,41 +1,68 @@
 {
-  "fill": {
-    "automatic-gradient": "extended-srgb:0.11765,0.11765,0.11765,1.00000"
-  },
-  "groups": [
+  "fill" : "automatic",
+  "groups" : [
     {
-      "layers": [
+      "layers" : [
         {
-          "image-name": "walker-left.svg",
-          "name": "walker-left",
-          "is-glass": true
+          "fill" : {
+            "solid" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+          },
+          "image-name" : "walker-left.svg",
+          "name" : "walker-left",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -25.889999999999986,
+              0
+            ]
+          }
         },
         {
-          "image-name": "walker-right.svg",
-          "name": "walker-right",
-          "is-glass": true
+          "fill" : {
+            "solid" : "srgb:0.00000,0.99144,1.00000,1.00000"
+          },
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "walker-right.svg",
+          "name" : "walker-right",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              25.889999999999986,
+              0
+            ]
+          }
         },
         {
-          "image-name": "walker-lead.svg",
-          "name": "walker-lead",
-          "is-glass": true
+          "fill" : {
+            "solid" : "extended-srgb:0.20392,0.78039,0.34902,1.00000"
+          },
+          "image-name" : "walker-lead.svg",
+          "name" : "walker-lead",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              -3.4200000000000728
+            ]
+          }
         }
       ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
       },
-      "translucency": {
-        "enabled": true,
-        "value": 0.5
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
       }
     }
   ],
-  "supported-platforms": {
-    "circles": [
+  "supported-platforms" : {
+    "circles" : [
       "watchOS"
     ],
-    "squares": [
+    "squares" : [
       "iOS"
     ]
   }

@@ -3,6 +3,21 @@
  *
  * Run with:  npx vite-node tools/iosIcon.ts
  *
+ * ---------------------------------------------------------------------------
+ * STOP. `ios/App/Walky.icon` HAS BEEN EDITED BY HAND SINCE THIS LAST RAN.
+ *
+ * The bundle was opened in Icon Composer and changed in ways this file cannot
+ * express: the three walkers were recoloured to Apple's system palette, moved
+ * to +-25.89pt, and the `#1E1E1E` ground was replaced by `"automatic"`. This
+ * script begins by `rmSync`-ing the whole bundle, so running it now DESTROYS
+ * that work, and it is not in git -- the edit is uncommitted.
+ *
+ * The spread was ported back into `appIcons.ts` (see SPREAD there) so the web
+ * icons match the new composition. The colours deliberately were not. Before
+ * running this again, either reproduce the hand-edit here or commit the bundle
+ * first so it can be recovered.
+ * ---------------------------------------------------------------------------
+ *
  * Same mark as `appIcons.ts` -- three pedestrians packed into a triangle, each
  * a filled dot in a goal colour with a white ring -- but authored as layers in
  * a `.icon` bundle rather than flattened to a PNG. That is what buys Liquid

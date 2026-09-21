@@ -31,6 +31,16 @@ describe('buildPrecacheList', () => {
     expect(files).toEqual(['index.html']);
   });
 
+  it('drops the crawler files, so a lastmod date cannot retire every worker', () => {
+    const files = buildPrecacheList(['index.html'], ['robots.txt', 'sitemap.xml']);
+    expect(files).toEqual(['index.html']);
+  });
+
+  it('drops the link-preview card, which only scrapers ever fetch', () => {
+    const files = buildPrecacheList(['index.html'], ['images/og.png', 'images/icon.png']);
+    expect(files).toEqual(['images/icon.png', 'index.html']);
+  });
+
   it('normalises leading slashes and deduplicates', () => {
     expect(buildPrecacheList(['./index.html', '/index.html'], ['index.html']))
       .toEqual(['index.html']);

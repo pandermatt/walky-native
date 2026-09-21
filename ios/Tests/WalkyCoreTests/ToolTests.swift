@@ -11,6 +11,9 @@ private final class Recorder {
   var goalsAt: [Point] = []
   var notices: [String] = []
   var deactivated = 0
+  /// How many undo checkpoints a gesture asked for -- one per stroke, not one
+  /// per dot; see `PedestrianTool`.
+  var checkpoints = 0
   var selectionCleared = 0
   var goalHits = true
   /// Blocks offered to `markGenerator`, and whether one was there to mark.
@@ -22,8 +25,19 @@ private final class Recorder {
   var lassoCatches = 1
   var selected = 0
   var measured: [(Point, Point)] = []
+  /// How far the map is turned, for the two tools that draw a box.
+  var spin: Double = 0
   /// A box that a point may not be inside, as a wall is. Nil means open ground.
   var blocked: (minX: Double, minY: Double, maxX: Double, maxY: Double)?
+
+  /// The id of the wall under a point, for the tools that ask which block they
+  /// are pointing at. The same `blocked` box `standable` uses.
+  let wallId = 7
+  func wallIdAt(_ at: Point) -> Int? {
+    guard let b = blocked, at.x >= b.minX, at.x <= b.maxX,
+          at.y >= b.minY, at.y <= b.maxY else { return nil }
+    return wallId
+  }
 
   /// Out through the left edge, which is enough to tell "it was moved" from
   /// "it was taken as tapped".
@@ -41,7 +55,11 @@ private final class Recorder {
     settings: { SettingsSnapshot(pedestrianRadius: 13, personalSpace: 40,
                                  brushSize: 1, borderThickness: 12) },
     pedestrianBlock: { at, _ in [at] },
-    addPedestrians: { [unowned self] at in self.pedestriansAt.append(at) },
+    addPedestrians: { [unowned self] at in
+      self.pedestriansAt.append(at)
+      return [at]
+    },
+    checkpoint: { [unowned self] in self.checkpoints += 1 },
     setGoalAt: { [unowned self] at in self.goalsAt.append(at); return self.goalHits },
     markGenerator: { [unowned self] at in self.doorsAt.append(at); return self.doorFits },
     selectPedestriansIn: { [unowned self] lasso in
@@ -55,7 +73,9 @@ private final class Recorder {
     notify: { [unowned self] m in self.notices.append(m) },
     requestRender: {},
     colorAt: { _ in nil },
+    wallIdAt: { [unowned self] at in self.wallIdAt(at) },
     worldPerPixel: { [unowned self] in self.perPixel },
+    viewRotation: { [unowned self] in self.spin },
     measure: { [unowned self] a, b in self.measured.append((a, b)) })
 }
 
@@ -286,14 +306,45 @@ struct HoverTests {
     #expect(t.preview().cursorGhost == nil)
   }
 
-  @Test("the brush's ghost dots clear on lift")
+  @Test("the brush's ghost dots show what is free, and clear on lift")
   func pedestrianGhost() {
     let r = Recorder(); let t = PedestrianTool()
-    t.onPointerDown(down(Point(0, 0)), r.ctx)
-    t.onPointerMove(move(Point(20, 0)), r.ctx)
+    // Not painting -- `up` is a move with no button, which is what a hover is.
+    // The ghost is the block that *would* be filled.
+    t.onPointerMove(up(Point(0, 0)), r.ctx)
     #expect(!t.preview().pendingPedestrians.isEmpty)
-    t.onPointerUp(up(Point(20, 0)), r.ctx)
+
+    // Painting fills it, so nothing there is still free. This used to be
+    // discovered by asking `pedestrianBlock` a second time in the same event,
+    // spatial-hash rebuild and all.
+    t.onPointerDown(down(Point(0, 0)), r.ctx)
     #expect(t.preview().pendingPedestrians.isEmpty)
+    t.onPointerUp(up(Point(0, 0)), r.ctx)
+    #expect(t.preview().pendingPedestrians.isEmpty)
+  }
+
+  /// The brush was the only drag tool committing a world edit on every raw
+  /// pointer event -- sixty or a hundred and twenty a second, each one a
+  /// checkpoint copying every wall and every agent already placed.
+  @Test("a stroke is one checkpoint, and one dot per body's width")
+  func strokeIsOneEdit() {
+    let r = Recorder(); let t = PedestrianTool()
+    t.onPointerDown(down(Point(0, 0)), r.ctx)
+    #expect(r.pedestriansAt.count == 1)
+
+    // The fake's radius is 13, so the pitch is 26: every one of these lands
+    // inside the block just painted and can put nobody anywhere new.
+    for x in stride(from: 4.0, through: 24.0, by: 4) {
+      t.onPointerMove(move(Point(x, 0)), r.ctx)
+    }
+    #expect(r.pedestriansAt.count == 1, "it painted where there was no room")
+
+    // Past the pitch, and it paints again.
+    t.onPointerMove(move(Point(30, 0)), r.ctx)
+    #expect(r.pedestriansAt.count == 2)
+
+    t.onPointerUp(up(Point(30, 0)), r.ctx)
+    #expect(r.checkpoints == 1, "a stroke is one edit, so one undo takes it back")
   }
 
   @Test("the goal tool's target lines clear on lift")
@@ -574,14 +625,271 @@ struct GeneratorToolTests {
     #expect(host.doorsAt == [Point(12, 12)])
   }
 
-  @Test("no ghost is left parked after the finger lifts")
+  /// It used to draw the goal tool's ring at the cursor. A ring at the cursor
+  /// says where the cursor is, which the cursor was already saying -- and three
+  /// of the seven tools were drawing the same one.
+  @Test("the block under the pointer is previewed as the door it would become")
+  func marksTheBlock() {
+    let host = Recorder()
+    host.blocked = (minX: 0, minY: 0, maxX: 20, maxY: 20)
+    let tool = GeneratorTool()
+
+    tool.onPointerMove(move(Point(10, 10)), host.ctx)
+    #expect(tool.preview().markingWallId == host.wallId)
+    #expect(tool.preview().cursorGhost == nil, "the ring is what this replaced")
+
+    // Bare ground names nothing: there is no block there to become anything.
+    tool.onPointerMove(move(Point(100, 100)), host.ctx)
+    #expect(tool.preview().markingWallId == nil)
+  }
+
+  @Test("no block is left outlined after the finger lifts")
   func noHover() {
     let host = Recorder()
+    host.blocked = (minX: 0, minY: 0, maxX: 20, maxY: 20)
     let tool = GeneratorTool()
 
     tool.onPointerDown(down(Point(10, 10)), host.ctx)
-    #expect(tool.preview().cursorGhost != nil)
+    #expect(tool.preview().markingWallId != nil)
     tool.onPointerUp(up(Point(10, 10)), host.ctx)
+    #expect(tool.preview().markingWallId == nil)
+  }
+}
+
+/// The box tools on a map somebody has twisted.
+///
+/// Driven through a real `Viewport` rather than by handing the tools an angle
+/// and asserting on the angle back: what the complaint was about is what the
+/// *screen* shows, so every assertion here is made after `worldToScreen`, and a
+/// sign error in either direction fails it.
+@Suite("A box drawn on a turned map")
+@MainActor
+struct TurnedBoxTests {
+  private func turned(_ degrees: Double) -> Viewport {
+    var v = Viewport()
+    v.width = 400
+    v.height = 300
+    v.rotateBy(Point(200, 150), degrees * Double.pi / 180)
+    return v
+  }
+
+  /// Whether every side of a ring runs along one of the screen's own axes.
+  /// The tolerance is a point and a half: `snap` rounds both drag corners to
+  /// whole world units before the box is built from them.
+  private func squareToScreen(_ ring: [Point], _ v: Viewport) -> Bool {
+    let onScreen = ring.map { v.worldToScreen($0) }
+    for i in onScreen.indices {
+      let a = onScreen[i], b = onScreen[(i + 1) % onScreen.count]
+      if abs(a.x - b.x) > 1.5 && abs(a.y - b.y) > 1.5 { return false }
+    }
+    return true
+  }
+
+  @Test("the rectangle follows the screen's axes, which turns the wall itself")
+  func rectangleIsSquareToTheScreen() {
+    let v = turned(31)
+    let r = Recorder(); r.spin = v.rotation
+    let t = RectangleTool()
+    t.onPointerDown(down(v.screenToWorld(Point(120, 90))), r.ctx)
+    t.onPointerUp(up(v.screenToWorld(Point(300, 210))), r.ctx)
+
+    #expect(r.walls.count == 1)
+    #expect(squareToScreen(r.walls[0][0], v))
+    // And it really is turned: a wall square to a 31° screen cannot also be
+    // square to the world, so this is what says the fix is not a no-op.
+    #expect(!squareToScreen(r.walls[0][0], Viewport()))
+  }
+
+  @Test("the preview is the shape that will be committed, not its bounding box")
+  func previewMatchesTheCommit() {
+    let v = turned(-47)
+    let r = Recorder(); r.spin = v.rotation
+    let t = RectangleTool()
+    let a = v.screenToWorld(Point(100, 100)), b = v.screenToWorld(Point(260, 190))
+    t.onPointerDown(down(a), r.ctx)
+    t.onPointerMove(move(b), r.ctx)
+    let shown = t.preview().pendingRect
+    t.onPointerUp(up(b), r.ctx)
+
+    guard let shown, r.walls.count == 1 else { Issue.record("nothing drawn"); return }
+    #expect(squareToScreen(shown, v))
+    // Corner for corner the same shape, to within the rounding `snap` does to
+    // the committed drag and the preview does not -- which is the only
+    // difference between the two, and was so before rotation existed.
+    #expect(shown.count == r.walls[0][0].count)
+    for (p, q) in zip(shown, r.walls[0][0]) {
+      #expect(distance(p, q) < 1.5)
+    }
+  }
+
+  @Test("a straight map draws exactly the box it always did")
+  func straightIsUntouched() {
+    let r = Recorder(); let t = RectangleTool()
+    t.onPointerDown(down(Point(0, 0)), r.ctx)
+    t.onPointerUp(up(Point(100, 80)), r.ctx)
+    #expect(r.walls[0][0] == rectanglePolygon(Point(0, 0), Point(100, 80)))
+  }
+
+  @Test("every bar of a border frame is square to the screen too")
+  func borderIsSquareToTheScreen() {
+    let v = turned(19)
+    let r = Recorder(); r.spin = v.rotation
+    let t = BorderTool()
+    t.onPointerDown(down(v.screenToWorld(Point(60, 40))), r.ctx)
+    t.onPointerUp(up(v.screenToWorld(Point(340, 260))), r.ctx)
+
+    #expect(r.walls.count == 1)
+    #expect(r.walls[0].count == 4)
+    for bar in r.walls[0] { #expect(squareToScreen(bar, v)) }
+  }
+
+  @Test("a frame that fits on screen is not called unusable for being turned")
+  func borderFitsMeasuresTheDrag() {
+    // 45° is the worst case: the bounding box of this drag in world space is
+    // half again as wide as the drag, so a fit test that measured the box
+    // would pass frames with no room in them -- and, turned the other way,
+    // refuse ones that have.
+    let v = turned(45)
+    let a = v.screenToWorld(Point(100, 100)), b = v.screenToWorld(Point(220, 200))
+    #expect(borderFits(a, b, 12, 13, v.rotation))
+    // The same drag shrunk below the margin is refused, turned or not.
+    let small = v.screenToWorld(Point(150, 150))
+    #expect(!borderFits(a, small, 12, 13, v.rotation))
+  }
+}
+
+/// The one table the bar, the menu bar and the Settings page all read.
+///
+/// The port of `web/src/__tests__/toolbar.test.ts`, which asserts the same
+/// derivation for the same reason: the web's own comment says a list of
+/// shortcuts kept anywhere but the button table "goes wrong the first time a
+/// tool moves", and this port had already proved it -- two spellings of "Mark
+/// goal" and two opinions about what 5 does.
+@Suite("The command table")
+struct CommandTableTests {
+  @Test("every tool has a digit, in the order the bar draws them")
+  func digitsFollowTheBar() {
+    // The five with a cell, then the two in the overflow menu.
+    let expected = ["1": ToolId.wall, "2": .rectangle, "3": .border,
+                    "4": .pedestrian, "5": .goal, "6": .generator, "7": .measure]
+    for (digit, tool) in expected {
+      #expect(Command.bare(digit)?.tool == tool, "\(digit) should arm \(tool)")
+    }
+    #expect(Command.tools == [.wall, .rectangle, .border, .pedestrian,
+                             .goal, .generator, .measure])
+    // A phone's bar is the first five of those, so the digits are the same on
+    // both platforms -- a Mac simply shows two more cells.
+    #expect(Command.barTools == [.wall, .rectangle, .border, .pedestrian, .goal])
+    // And the bar's five are the first five digits, which is the whole rule:
+    // the number is how far down the bar a tool is.
+    for (index, tool) in Command.tools.enumerated() {
+      #expect(Command.of(tool)?.shortcut == Shortcut(.character("\(index + 1)")))
+    }
+  }
+
+  @Test("every tool is in the table exactly once")
+  func everyToolIsListed() {
+    for tool in ToolId.allCases {
+      let found = Command.all.filter { $0.tool == tool }
+      #expect(found.count == 1, "\(tool) should appear once")
+      #expect(found.first?.shortcut != nil, "\(tool) has no key")
+    }
+  }
+
+  @Test("no key is bound twice")
+  func noKeyIsBoundTwice() {
+    let keys = Command.all.compactMap(\.shortcut)
+    #expect(Set(keys).count == keys.count)
+  }
+
+  @Test("every action in the enum has a row")
+  func everyActionIsListed() {
+    for action in ToolbarAction.allCases {
+      #expect(Command.all.contains { $0.action == action }, "\(action) is not in the table")
+    }
+  }
+
+  @Test("a shortcut writes itself the way a person does")
+  func keysReadCorrectly() {
+    #expect(Command.of(.undo)?.shortcut?.label == "\u{2318}Z")
+    #expect(Command.of(.start)?.shortcut?.label == "Space")
+    #expect(Command.of(.clear)?.shortcut?.label == "\u{21E7}\u{2318}\u{232B}")
+    #expect(Command.of(.wall)?.shortcut?.label == "1")
+  }
+
+  /// The guard the key handlers rely on: only the bare keys are theirs, and
+  /// everything with Command on it belongs to the menu bar.
+  @Test("bare lookup never answers with a Command shortcut")
+  func bareIsBare() {
+    #expect(Command.bare("z") == nil, "Cmd-Z is the menu's")
+    #expect(Command.bare("o") == nil)
+    #expect(Command.bare("0") == nil, "Cmd-0 is the menu's")
+    #expect(Command.bare("1")?.tool == .wall)
+  }
+}
+
+/// What a pointer that is merely hovering is allowed to draw.
+///
+/// Hover exists on macOS and nowhere else -- `PointerRouter.hovered` is called
+/// from one place, the Mac's `mouseMoved` -- so this is the rule for what
+/// follows a cursor around a Mac window, and it cost the phone nothing to
+/// write: on iOS a ghost is only ever drawn under a finger already down.
+@Suite("Hovering")
+@MainActor
+struct HoverPreviewTests {
+  @Test("two of the seven tools mark where the pointer is")
+  func onlyTwoGhostOnHover() {
+    for tool in ToolId.allCases {
+      let expected = tool == .pedestrian || tool == .goal
+      #expect(tool.ghostsOnHover == expected, "\(tool)")
+    }
+  }
+
+  @Test("the pointer leaving takes the block of bodies with it")
+  func pedestrianBlockGoes() {
+    let host = Recorder()
+    let tool = PedestrianTool()
+    tool.onPointerMove(move(Point(40, 40)), host.ctx)
+    #expect(!tool.preview().pendingPedestrians.isEmpty)
+
+    tool.pointerLeft()
+    // It used to stay parked wherever the pointer left the window: the ghost
+    // was the only preview the renderer gated on there being a pointer at all.
+    #expect(tool.preview().pendingPedestrians.isEmpty)
+  }
+
+  @Test("and the fan of lines to the goal")
+  func targetLinesGo() {
+    let host = Recorder()
+    let tool = GoalTool()
+    tool.onPointerMove(move(Point(40, 40)), host.ctx)
+    #expect(tool.preview().targetLines != nil)
+    #expect(tool.preview().cursorGhost != nil)
+
+    tool.pointerLeft()
+    #expect(tool.preview().targetLines == nil)
     #expect(tool.preview().cursorGhost == nil)
+  }
+
+  /// The one that would break two-tap mode if `pointerLeft` were `cancel`.
+  @Test("a half-drawn rectangle survives the pointer leaving")
+  func halfDrawnShapesSurvive() {
+    let host = Recorder()
+    let tool = RectangleTool()
+    // One corner placed, by a tap rather than a drag.
+    tool.onPointerDown(down(Point(0, 0)), host.ctx)
+    tool.onPointerUp(up(Point(1, 1)), host.ctx)
+    tool.onPointerMove(move(Point(80, 60)), host.ctx)
+    #expect(tool.preview().pendingRect != nil, "the band should follow the pointer")
+
+    tool.pointerLeft()
+    #expect(tool.preview().pendingRect == nil, "the band should stop following")
+
+    // Back in the window, and the corner is still where it was put: leaving is
+    // not abandoning.
+    tool.onPointerMove(move(Point(90, 70)), host.ctx)
+    let band = try! #require(tool.preview().pendingRect)
+    #expect(band.contains { abs($0.x) < 1e-9 && abs($0.y) < 1e-9 },
+            "the first corner should still be the origin")
   }
 }

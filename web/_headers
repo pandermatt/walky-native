@@ -48,3 +48,12 @@
 
 /images/*
   Cache-Control: public, max-age=604800
+
+# The crawler's two files. Short rather than immutable: a sitemap that is a week
+# stale is a week of a new page going unfetched, and neither file is big enough
+# for the revalidation to matter.
+/robots.txt
+  Cache-Control: public, max-age=3600
+
+/sitemap.xml
+  Cache-Control: public, max-age=3600

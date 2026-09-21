@@ -53,10 +53,20 @@
   --c-text-2: 110, 110, 115;
   --c-text-3: 134, 134, 139;
 
+  /* Body copy on a tinted bento tile. Darker than --c-text-2 because a tint is
+     not white: at 110,110,115 the magenta card measures 4.33:1 and the rust one
+     4.41:1, both under AA. This measures 6.05:1 on the worst of the six. */
+  --c-tile-text: 90, 90, 96;
+
   --c-bg: 255, 255, 255;
   --c-bg-soft: 245, 245, 247;
 
   --c-divider: 210, 210, 215;
+
+  /* The ground Apple's dark map is drawn on, sampled off the imported shot in
+     public/images/map-uzh.webp. The one colour on this page that is neither
+     Walky's nor the site's, because it has to match a picture. */
+  --c-map-ground: 40, 48, 66;
 
   /* The dark band is black in both themes, the way the site's Recognition band
      is: the one surface an accent has to survive without the ground moving to
@@ -470,13 +480,6 @@ html[data-js] .reveal.is-visible {
 
 .hero-lead { max-width: 34ch; }
 
-.hero-bio {
-  max-width: 46ch;
-  color: rgba(var(--c-text-2), 1);
-  font-size: var(--fs-sm);
-  line-height: var(--lh-body);
-}
-
 .hero-cta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-s); }
 
 .hero-made {
@@ -485,54 +488,27 @@ html[data-js] .reveal.is-visible {
   color: rgba(var(--c-text-3), 1);
 }
 
-/* ── The App Store button ──────────────────────────────────────────────────
-   Large, and first: the native app is what this page is for. It is a <span>
-   rather than an <a> because there is no listing yet, and a link that goes
-   nowhere is worse than a control that says it is not ready. Turning it live is
-   a swap to <a href> and dropping .is-pending — see APP_STORE_URL in main.ts. */
+/* ── The three controls in the hero ────────────────────────────────────────
+   One size, set by `.button` above, and one icon size. The App Store is still
+   first and still the one the page is for, but it says so by being the only
+   FILLED one -- three pills at three different scales read as a control that
+   grew rather than a hierarchy, and the fill already carries the emphasis that
+   the extra padding was doing twice. */
 .button--store {
-  padding: 15px 26px;
-  font-size: 1.02rem;
   font-weight: 600;
   font-variation-settings: 'wght' 600;
   gap: 0.6em;
 }
-.button--store .apple-glyph { width: 19px; height: 19px; fill: currentColor; }
+.button--store .apple-glyph { width: 18px; height: 18px; fill: currentColor; }
 
-.button.is-pending {
-  cursor: default;
-  /* Muted rather than the flat opacity a disabled control usually takes: at
-     .4 the orange stops reading as the accent at all, and this is still the
-     thing the page is pointing at. */
-  background: rgba(var(--c-accent), 0.5);
-  border-color: transparent;
-  color: rgba(var(--c-on-accent), 0.75);
-}
-.button.is-pending:hover { background: rgba(var(--c-accent), 0.5); }
-.button.is-pending:active { transform: none; }
 
-.store-pill {
-  margin-left: 2px;
-  padding: 3px 9px;
-  border-radius: var(--radius-pill);
-  background: rgba(var(--c-on-accent), 0.14);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  font-variation-settings: 'wght' 600;
-  letter-spacing: var(--ls-xs);
-  text-transform: uppercase;
-}
-
-/* The browser and the repo, deliberately smaller than the App Store button.
-   Each carries a glyph -- a globe and the GitHub mark -- in the text's colour,
-   so the hover that recolours the label recolours the icon with it. */
-.button--web {
-  padding: 10px 18px;
-  font-size: var(--fs-sm);
-}
+/* The browser and the repo. Each carries a glyph -- a globe and the GitHub
+   mark -- in the text's colour, so the hover that recolours the label recolours
+   the icon with it. Sized to match the Apple glyph opposite, so the three pills
+   line up on their icons as well as on their edges. */
 .button--web .button-icon {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   flex: none;
 }
 
@@ -577,34 +553,341 @@ html[data-js] .reveal.is-visible {
    11. FEATURES
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.feature-grid {
+/*
+ * Six columns, tiles spanning two to four of them.
+ *
+ * Six rather than three because a bento is only a bento if the tiles are not
+ * all one size: 4+2 on the first row and 3+3 on the second is the whole effect,
+ * and neither is expressible on a three-column track.
+ *
+ * `align-items: stretch` is the default and is load-bearing here -- a tile whose
+ * picture is pinned to its bottom edge has to know where that edge is, and an
+ * auto-height tile in a stretched row does.
+ */
+.bento {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: var(--space-m);
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-s);
   margin-top: var(--space-l);
 }
 
-.feature {
-  padding: var(--space-m);
+.tile--w2 { grid-column: span 2; }
+.tile--w4 { grid-column: span 4; }
+
+/*
+ * Every tile wears one of the app's six accents.
+ *
+ * Not decoration picked to look nice: these are `Accents.all` from
+ * WalkyCore/Theme.swift, the colours the armed tool is tinted with, and a wall
+ * on the map could genuinely come out any of them. The eyebrow takes that same
+ * colour under `shadowOf()` -- Java's `Color.darker()` twice, the operation that
+ * already derives `--c-accent-ink` and the #1E1E1E ground. So a tile is one
+ * colour and its own shadow, which is the claim §1 makes about the accent,
+ * extended rather than broken.
+ *
+ * THE ALPHA IS MEASURED. At 0.10, which is what looks right by eye, body copy
+ * on the magenta card falls to 4.33:1 and on rust to 4.41:1 -- both under AA.
+ * 0.08 with --c-tile-text puts the worst of the six at 6.05:1. Do not raise it
+ * without re-running the numbers.
+ */
+/* All six, including any the page is not currently using -- they are one set
+   (`Accents.all`), and half a palette is harder to reach for than a whole one. */
+.tile--orange { --tile-tint: 255, 200, 0; --tile-ink: 124, 98, 0; }
+.tile--teal { --tile-tint: 41, 214, 168; --tile-ink: 19, 104, 81; }
+.tile--lime { --tile-tint: 168, 214, 66; --tile-ink: 81, 104, 32; }
+.tile--magenta { --tile-tint: 196, 25, 192; --tile-ink: 95, 11, 93; }
+.tile--sky { --tile-tint: 66, 158, 214; --tile-ink: 32, 77, 104; }
+.tile--rust { --tile-tint: 214, 66, 39; --tile-ink: 104, 32, 18; }
+
+.tile {
+  /* 20px rather than --space-m: eight tiles in three rows is a tighter grid
+     than ten in four, and 24 inside a 312px card starts to read as a margin. */
+  padding: 20px;
   border-radius: var(--radius-card);
-  background: rgba(var(--c-bg), 1);
-  border: 1px solid rgba(var(--c-divider), 0.55);
+  /* Laid over white rather than given as a flat colour, so a tile with no
+     accent falls back to the card and not to nothing. */
+  background:
+    linear-gradient(rgba(var(--tile-tint, 255, 255, 255), var(--tile-alpha, 0.08)),
+                    rgba(var(--tile-tint, 255, 255, 255), var(--tile-alpha, 0.08))),
+    rgba(var(--c-bg), 1);
   box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   gap: var(--space-2xs);
 }
 
-.feature h3 { margin-bottom: var(--space-3xs); }
-.feature p { color: rgba(var(--c-text-2), 1); font-size: var(--fs-sm); line-height: var(--lh-body); }
+.tile h3 { margin-bottom: var(--space-3xs); }
+.tile p {
+  color: rgba(var(--c-tile-text), 1);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+/* The eyebrow is the one place the accent is stated rather than washed. */
+.tile .label { margin-bottom: 6px; color: rgba(var(--tile-ink, var(--c-text-2)), 1); }
+
+/* The attribution OpenStreetMap's licence asks for, and the app already shows.
+   Smaller than the copy above it, because it is a credit and not a feature, and
+   pinned to the foot of the card rather than trailing the paragraph -- a licence
+   line belongs at the bottom of the thing it licenses. */
+.tile-fineprint {
+  margin-top: auto;
+  padding-top: var(--space-2xs);
+  border-top: 1px solid rgba(var(--c-tile-text), 0.22);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  /* --c-tile-text, not --c-text-3. The lighter grey is chosen against white and
+     measures 3.2:1 on the magenta card -- fine on the map tile, which is the
+     only card carrying a credit today, and a trap the moment a tinted one does.
+     This is 6.05:1 on the worst of the six. */
+  color: rgba(var(--c-tile-text), 1);
+}
+
+/* Beta, said where the app says it. Inline in the eyebrow rather than floated
+   into a corner: it qualifies the label it sits in. */
+.tag {
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--tile-tint, var(--c-accent)), 0.22);
+  color: rgba(var(--tile-ink, var(--c-accent-ink)), 1);
+  font-size: 0.66rem;
+  letter-spacing: var(--ls-xs);
+}
+
+/*
+ * The map tile.
+ *
+ * The picture is the card, not something sitting on it: `screen-import.webp`
+ * with the phone cropped off it, so what is left is a Walky map of Siena's
+ * Piazza del Campo with a crowd standing in the square.
+ *
+ * A scrim is what makes the copy readable on it. Left-to-right from the card's
+ * own ground to nothing, so the words sit on near-solid colour while the map
+ * runs free on the right -- rather than a flat wash over the whole picture,
+ * which dims the map everywhere to fix legibility in one corner.
+ *
+ * Deliberately no tint class on this tile: it already has every colour.
+ */
+/*
+ * Dark, alone among eight pale cards.
+ *
+ * Not a style choice so much as the picture's: the import is shown on Apple's
+ * dark map, and a white scrim over it would turn a navy full of colour into
+ * grey. So the card takes the map's own ground -- sampled off the file at
+ * rgb(40,48,66) -- and the copy goes light. It is the only tile that carries a
+ * photograph, and being the only dark one is how the grid says so.
+ */
+.tile--map {
+  position: relative;
+  overflow: hidden;
+  background: rgba(var(--c-map-ground), 1);
+}
+
+.tile--map h3 { color: rgba(var(--c-band-text), 1); }
+.tile--map p { color: rgba(var(--c-band-text), 0.74); }
+/* The accent as a fill, not as ink: --c-accent-ink is a shadow meant for white
+   and measures 3.6:1 here, which §6 already calls a border and not a link. */
+.tile--map .label { color: rgba(var(--c-accent), 1); }
+
+/*
+ * An <img>, not a CSS background-image.
+ *
+ * This stylesheet is emitted into assets/ with a content hash, so a relative
+ * url() inside it resolves against assets/ in the build and against the
+ * document in dev -- two different files, one of which is always a 404. It is
+ * the same trap the @font-face in index.html's <head> exists to avoid. An img
+ * carries a document-relative src like every other picture on the page, and
+ * gets lazy loading into the bargain.
+ */
+.tile-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 62% center;
+  /* Bottom of the three layers. Stated rather than left to document order:
+     ::before generates the scrim as the FIRST child, so without this the image
+     paints over the very thing that is supposed to be dimming it, and the copy
+     ends up on the raw map. */
+  z-index: 0;
+}
+
+.tile--map::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to right,
+    rgba(var(--c-map-ground), 0.97) 0%,
+    rgba(var(--c-map-ground), 0.95) 46%,
+    rgba(var(--c-map-ground), 0.62) 72%,
+    rgba(var(--c-map-ground), 0.08) 100%
+  );
+}
+
+/* Above the scrim, which is the whole point of it. Scoped to the copy and NOT
+   written as `.tile--map > *`: that also hits .tile-bg, whose `position:
+   absolute` is what keeps a 280px image out of flow. With it overridden the
+   image lands in the column and the tile grows to 457px for no reason. */
+/* Held inside the solid end of the scrim rather than measured in characters: a
+   line that runs to 46ch reaches 70% of the card, which is where the gradient
+   has already given the map back and the last few words land on a crowd. */
+.tile--map .tile-copy { position: relative; z-index: 2; max-width: 46%; }
+
+/* The licence line is the one piece of copy on this card that has to be legible
+   as a matter of obligation rather than taste, and --c-text-3 is a grey chosen
+   against white, not against a map showing through. It takes the body colour
+   here, and it has to sit ABOVE the scrim like the rest of the copy -- it is a
+   sibling of .tile-copy now, so it needs its own z-index. */
+.tile--map .tile-fineprint {
+  position: relative;
+  z-index: 2;
+  color: rgba(var(--c-band-text), 0.6);
+  border-top-color: rgba(var(--c-band-text), 0.22);
+  /* Held to the scrim's solid end, the way .tile-copy is. */
+  max-width: 46%;
+}
+
+/* The padding moves off the tile and onto the body, so the stickers can reach
+   the card's own edges and bleed past them. */
+/*
+ * Twice the wash of the other seven, and warm on purpose.
+ *
+ * Every sticker in the pack is cool -- green, purple, blue, teal -- so a warm
+ * ground sets all six off at once, and none of them is orange, so nothing on
+ * the card disappears into it. At the usual 0.08 the tile read as white with a
+ * tint by accident; at 0.16 it reads as a colour that was chosen. Checked
+ * rather than eyeballed: the eyebrow measures 5.38:1 on it and the heading
+ * 15.55:1, both comfortably over AA.
+ */
+.tile--stickers {
+  --tile-alpha: 0.16;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+}
+
+.tile--stickers .tile-body {
+  padding: 20px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+/*
+ * Nine stickers filling the card, the way they land in a thread.
+ *
+ * The tile used to be a heading, a line of copy and three stickers along the
+ * bottom. It says what it is in the heading now -- eighteen of them -- so the
+ * copy went and the pack itself is the card.
+ *
+ * A three-column grid rather than a row: six in a line at this width would be
+ * 52px each, which is smaller than the speech bubbles drawn inside them. The
+ * grid bleeds past the card's edges on both sides and at the foot, so it reads
+ * as a handful spilling out rather than a tidy six-up contact sheet.
+ */
+.tile--stickers .tile-figure {
+  margin-top: auto;
+  padding-top: var(--space-s);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  /* Out past all three edges. The card clips them. */
+  margin-inline: -10px;
+  margin-bottom: -22px;
+  column-gap: 0;
+  row-gap: 4px;
+}
+
+.tile--stickers .tile-figure img {
+  width: 100%;
+  height: auto;
+}
+
+/* Tipped alternately, so a grid stops reading as a grid. The nth-child runs
+   across rows, which is what keeps neighbours leaning opposite ways. */
+.tile--stickers .tile-figure img:nth-child(odd) { transform: rotate(-6deg); }
+.tile--stickers .tile-figure img:nth-child(even) { transform: rotate(6deg); z-index: 1; }
+
+/*
+ * Narrow: two columns, then one.
+ *
+ * Every tile takes one column, including the one that takes four at full width.
+ * Eight is even, so the pairs come out flush and no row is left with a hole in
+ * it -- which is what a surviving `span 2` would cause, since a two-wide tile
+ * cannot start in the second column and pushes itself to the next row.
+ */
+@media (max-width: 900px) {
+  .bento { grid-template-columns: repeat(2, 1fr); }
+  .tile--w2,
+  .tile--w4 { grid-column: span 1; }
+
+  /*
+   * A two-column tile is not wide enough to fade across, so the scrim turns
+   * ninety degrees: solid under the copy, clearing into a band at the foot
+   * where the map shows.
+   *
+   * The stops are in PIXELS FROM THE BOTTOM, not percentages. The copy on this
+   * card wraps to four or five lines at phone widths and two at tablet, so a
+   * percentage stop lands in a different place on every screen -- which is how
+   * the licence line ended up half-dissolved into a crowd of dots. A fixed band
+   * plus matching padding says the same thing at every height: copy on solid
+   * ground, map below it.
+   */
+  .tile--map {
+    min-height: 230px;
+    padding-bottom: 124px;
+  }
+  .tile--map .tile-bg { object-position: center 62%; }
+  /* The scrim is horizontal no longer, so the copy has the full width again. */
+  .tile--map .tile-copy,
+  .tile--map .tile-fineprint { max-width: none; }
+
+  /* And the credit comes back up to sit under the copy instead of at the foot.
+     A horizontal scrim is solid all the way down its left edge, so a footer
+     there is still on solid ground; a vertical one clears toward the bottom,
+     which is precisely where a pinned footer would land. */
+  .tile--map .tile-fineprint { margin-top: var(--space-2xs); }
+  .tile--map::before {
+    /* Holds solid further down than the horizontal one does: stacked, the copy
+       occupies most of the card, and the credit is the last line of it. */
+    background: linear-gradient(
+      to bottom,
+      rgba(var(--c-map-ground), 0.96) 0,
+      rgba(var(--c-map-ground), 0.96) calc(100% - 124px),
+      rgba(var(--c-map-ground), 0.45) calc(100% - 46px),
+      rgba(var(--c-map-ground), 0.06) 100%
+    );
+  }
+}
+
+@media (max-width: 600px) {
+  .bento { grid-template-columns: 1fr; }
+}
 
 /* Width as well as height, and align-self so the flex column does not stretch
    it: an <svg> given only a height fills the row and then centres its viewBox
    inside it under the default preserveAspectRatio, which puts the mark in the
    middle of a card whose every other line is flush left. */
+/*
+ * One height for every mark, whatever its viewBox.
+ *
+ * They are drawn on two different grids -- 40x22 for the three carried over
+ * from the first version, 46x26 for the newer ones -- and left to their own
+ * dimensions they line up along the top of their cards at two different sizes.
+ * Fixing the height and letting the width follow the viewBox's aspect is what
+ * makes a row of cards agree.
+ *
+ * `width: auto` rather than nothing: an <svg> given only a height stretches to
+ * fill its flex line and then centres its viewBox inside that, which puts the
+ * mark in the middle of a card whose every other line is flush left.
+ * `align-self` guards the same thing from the other direction.
+ */
 .feature-mark {
-  width: 40px;
-  height: 22px;
+  height: 26px;
+  width: auto;
   align-self: flex-start;
   margin-bottom: var(--space-2xs);
 }
@@ -613,74 +896,71 @@ html[data-js] .reveal.is-visible {
 .section-head .lead { margin-top: var(--space-xs); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   12. THE BAND, AND THE SCREENSHOTS ON IT
+   12. THE APP STORE SCREENSHOTS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.section--dark .label { color: rgba(var(--c-band-text), 0.6); }
-.section--dark .section-head { max-width: var(--measure); }
-
 /*
- * Three phones in a row.
+ * The three shots submitted to Apple, shown as they were submitted.
  *
- * No drawn bezel around them. The screenshots already carry the device's own
- * frame -- the status bar, the rounded screen corners, the home indicator --
- * and a second frame painted around that is a picture of a phone inside a
- * picture of a phone.
+ * Each one is a finished composition: its heading, its subtitle and its phone,
+ * on its own background colour. So there is no drawn bezel, no padding and no
+ * caption laid over it -- the card IS the picture, and the only thing this
+ * stylesheet adds is the corner and the colour behind it.
  *
- * The radius is therefore not what makes the corner: the shot already has one,
- * and what falls outside it is black, which on this band is invisible. It is
- * there so the hairline below follows the device's corner instead of cutting
- * across it. 27px is that corner measured off the file -- 62px in a 570px-wide
- * shot -- at the ~250px the row renders each phone at on a desktop. A phone
- * shown alone on a narrow screen is wider and wants a few pixels more; the
- * difference is smaller than the hairline is thick.
+ * That colour is the one thing that cannot be left out. A rounded corner clipped
+ * over white leaves a pale crescent on the navy shot, and the eye reads it as a
+ * rendering fault rather than as a corner. Each value is sampled off the file.
  */
-.shots {
+.store-shots {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-l);
   margin-top: var(--space-l);
+  counter-reset: shot;
 }
 
-.shot { display: flex; flex-direction: column; gap: var(--space-xs); }
+.store-shot { display: flex; flex-direction: column; gap: var(--space-xs); }
 
-.shot img {
-  width: 100%;
-  height: auto;
-  border-radius: 27px;
-  /* A hairline, because the paper shot's cream ground and the band's black
-     would otherwise meet with no edge at all and the phone would read as a
-     hole cut in the band. */
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 18px 40px rgba(0, 0, 0, 0.5);
+.store-card {
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  /* The hairline earns its keep on the two pale shots, whose ground is within a
+     few percent of the page's own and would otherwise have no edge at all. */
+  border: 1px solid rgba(var(--c-divider), 0.5);
 }
 
-.shot-caption {
+.store-card img { width: 100%; height: auto; }
+
+.store-card--create { background: #e0f3ea; }
+.store-card--simulate { background: #f1f0ec; }
+/* Dark enough that the divider hairline would be the brightest thing on it. */
+.store-card--explore { background: #0d2043; border-color: rgba(var(--c-fill-edge)); }
+
+.store-caption {
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
-  color: rgba(var(--c-band-text), 0.66);
+  color: rgba(var(--c-text-2), 1);
 }
 
-/* The reset gives `strong` the page's ink, which on the black band is the ink
-   the band is made of. Everything inside the band takes the band's own text
-   colour instead, and emphasis here is the full-strength version of the muted
-   caption around it. */
-.section--dark strong { color: rgba(var(--c-band-text), 1); }
-
-.band-note {
-  max-width: var(--measure);
-  margin-top: var(--space-l);
-  color: rgba(var(--c-band-text), 0.72);
+/* The number, in the accent's readable shade. It is text rather than a ::before
+   counter because it is content: the captions are an ordered list of three
+   steps, and a screen reader should get "01" along with the sentence. */
+.store-num {
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-variation-settings: 'wght' 600;
+  color: rgba(var(--c-accent-ink), 1);
 }
-.band-note .link-arrow { margin-left: 4px; }
 
 /*
  * Narrow: a row you swipe, not a row with things missing.
  *
- * Three columns do not fit under 900px and the obvious fix -- hide the ones
- * that do not -- throws away a whole capability, and on a page that leads with
- * the App Store it would throw away the last one first. So the grid becomes a
- * scroller: every phone stays, at a size somebody can read, and the ones off
- * the edge are a swipe away.
+ * Three columns do not fit under 900px and the obvious fix -- hide the ones that
+ * do not -- throws a whole step out of a three-step sequence. So the grid becomes
+ * a scroller: every shot stays, at a size somebody can read the baked-in heading
+ * at, and the ones off the edge are a swipe away.
  *
  * The overflow is on the row and nowhere else. `.l-site` gives the section its
  * page margin, so the scroller is inset from both edges and the page itself
@@ -688,7 +968,7 @@ html[data-js] .reveal.is-visible {
  * usually breaks.
  */
 @media (max-width: 900px) {
-  .shots {
+  .store-shots {
     display: flex;
     gap: var(--space-m);
     overflow-x: auto;
@@ -696,24 +976,97 @@ html[data-js] .reveal.is-visible {
     -webkit-overflow-scrolling: touch;
     /* Room for the shadow, which a tight clip would slice off. */
     padding-block: 4px;
-    /* Bleed to the page edges and pad back, so a phone can sit flush against
-       the margin while the next one is visibly cut off beyond it -- which is
-       what tells you the row scrolls. */
+    /* Bleed to the page edges and pad back, so a card can sit flush against the
+       margin while the next one is visibly cut off beyond it -- which is what
+       tells you the row scrolls. */
     margin-inline: calc(var(--page-margin) * -1);
     padding-inline: var(--page-margin);
     scroll-padding-inline: var(--page-margin);
   }
   /* A scrollbar under a row of phones is chrome the row does not need; the cut
-     phone at the edge already says it scrolls. */
-  .shots::-webkit-scrollbar { display: none; }
-  .shots { scrollbar-width: none; }
+     card at the edge already says it scrolls. */
+  .store-shots::-webkit-scrollbar { display: none; }
+  .store-shots { scrollbar-width: none; }
 
-  .shot {
+  .store-shot {
     flex: 0 0 auto;
-    /* Wide enough to read the map in, narrow enough that the next one shows. */
-    width: min(74vw, 260px);
+    width: min(76vw, 280px);
     scroll-snap-align: start;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   12b. THE BLACK BAND
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.section--dark .label { color: rgba(var(--c-band-text), 0.6); }
+.section--dark .section-head { max-width: var(--measure); }
+.band-lead { color: rgba(var(--c-band-text), 0.72); }
+
+/* The reset gives `strong` the page's ink, which on the black band is the ink
+   the band is made of. Everything inside the band takes the band's own text
+   colour instead, and emphasis here is the full-strength version of the muted
+   note around it. */
+.section--dark strong { color: rgba(var(--c-band-text), 1); }
+
+/*
+ * Three figures, and what each one means.
+ *
+ * The figure is set at h3's size rather than display's: two of the three are
+ * phrases, not numerals, and a phrase at 3rem stops being a figure and becomes
+ * a headline competing with the one above it.
+ */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-l);
+  margin-top: var(--space-l);
+}
+
+.stat {
+  padding-top: var(--space-s);
+  border-top: 2px solid rgba(var(--c-accent), 1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+}
+
+.stat-figure {
+  font-size: var(--fs-h3);
+  font-weight: 700;
+  font-variation-settings: 'wght' 700;
+  letter-spacing: var(--ls-h3);
+  color: rgba(var(--c-band-text), 1);
+}
+
+.stat-note {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+  color: rgba(var(--c-band-text), 0.66);
+}
+
+.band-cta {
+  margin-top: var(--space-xl);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s);
+}
+
+/* The outline button's border and ink are the page's, which on black are very
+   nearly black. On the band it borrows the band's own text colour instead. */
+.button--on-band {
+  border-color: rgba(var(--c-band-text), 0.35);
+  color: rgba(var(--c-band-text), 1);
+}
+.button--on-band:hover {
+  border-color: rgba(var(--c-accent), 1);
+  color: rgba(var(--c-accent), 1);
+}
+
+@media (max-width: 760px) {
+  .stat-row { grid-template-columns: 1fr; gap: var(--space-m); }
+  .band-cta { margin-top: var(--space-l); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

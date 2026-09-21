@@ -20,7 +20,20 @@ import WalkyCore
 final class RenderCache {
   private var wallsRevision = -1
   private var hullRadius = -1.0
-  private(set) var wallPaths: [(path: Path, color: RGB, isGoal: Bool, isDoor: Bool)] = []
+  /// Part of the key, because the parts are now built only when shown: without
+  /// it, switching the diagnostic on would leave the cache holding the empty
+  /// list it built while the switch was off.
+  private var showedParts = false
+  /// The `Color` values go in the cache beside the paths because `draw` asked
+  /// for two of them per wall per frame -- a fill and a `shadowOf` -- and on a
+  /// 225-wall import that is 450 `Color` values built to draw a map that had
+  /// not changed. They are keyed by the same revision the paths are.
+  private(set) var wallPaths: [(path: Path, color: RGB, isGoal: Bool, isDoor: Bool,
+                                fill: Color, shadow: Color)] = []
+  /// `world.generators` is `walls.filter`, so reading it allocates an array.
+  /// `draw` read it once for the selection ring and `drawDoorSides` read it
+  /// again, so a map with no doors at all still built two arrays a frame.
+  private(set) var doors: [Wall] = []
   private(set) var hullPaths: [(path: Path, color: RGB)] = []
   private(set) var partPaths: [(path: Path, color: RGB)] = []
   private var goalPathKey = ""
@@ -30,9 +43,12 @@ final class RenderCache {
     // The hulls are expanded by the pedestrian radius, so the radius setting
     // invalidates them as surely as an edit does.
     let radius = world.settings.pedestrianRadius
-    guard wallsRevision != world.worldRevision || hullRadius != radius else { return }
+    let parts = world.settings.showConvexParts
+    guard wallsRevision != world.worldRevision || hullRadius != radius
+            || showedParts != parts else { return }
     wallsRevision = world.worldRevision
     hullRadius = radius
+    showedParts = parts
 
     wallPaths = world.walls.map { wall in
       var p = Path()
@@ -41,8 +57,11 @@ final class RenderCache {
         for q in polygon.dropFirst() { p.addLine(to: CGPoint(x: q.x, y: q.y)) }
         p.closeSubpath()
       }
-      return (p, wall.color, wall.isGoal, wall.generator != nil)
+      return (p, wall.color, wall.isGoal, wall.generator != nil,
+              MapRenderer.color(wall.color), MapRenderer.color(shadowOf(wall.color)))
     }
+
+    doors = world.walls.filter { $0.generator != nil }
 
     // One dashed outline per connected group of touching shapes, not per wall.
     //
@@ -64,10 +83,17 @@ final class RenderCache {
     // The convex parts a wall was decomposed into: a diagnostic for how a shape
     // was split, off by default. Already expanded -- these are the obstacles
     // navigation actually runs on.
-    partPaths = world.nav.obstacles.compactMap { ob in
-      guard let wall = world.walls.first(where: { $0.id == ob.wallId }) else { return nil }
-      return (ring(ob.hull), wall.color)
-    }
+    //
+    // Built only when it is drawn. It is an O(obstacles x walls) scan -- a
+    // linear `first(where:)` per obstacle -- and being off by default meant
+    // every wall edit on an imported map paid for a diagnostic nobody had
+    // asked to see.
+    partPaths = parts
+      ? world.nav.obstacles.compactMap { ob in
+          guard let wall = world.walls.first(where: { $0.id == ob.wallId }) else { return nil }
+          return (ring(ob.hull), wall.color)
+        }
+      : []
   }
 
   /// The route each pedestrian is going to walk.
@@ -200,12 +226,12 @@ enum MapRenderer {
     for w in cache.wallPaths {
       if w.isDoor {
         ctx.fill(w.path, with: .color(color(w.color, 0.22)))
-        ctx.stroke(w.path, with: .color(color(w.color)), style: doorDash)
+        ctx.stroke(w.path, with: .color(w.fill), style: doorDash)
         continue
       }
-      ctx.fill(w.path, with: .color(color(w.color)))
+      ctx.fill(w.path, with: .color(w.fill))
       // The shadow every wall casts, as java.awt.Color.darker() twice.
-      ctx.stroke(w.path, with: .color(color(shadowOf(w.color))), lineWidth: hairline)
+      ctx.stroke(w.path, with: .color(w.shadow), lineWidth: hairline)
     }
 
     // DASH = [9, 9] in screen points, so divided by the scale to stay 9pt at
@@ -237,7 +263,7 @@ enum MapRenderer {
     }
 
     // A lassoed generator, marked as the selected pedestrians are.
-    for door in world.generators where door.selected {
+    for door in cache.doors where door.selected {
       var p = Path()
       for polygon in door.polygons where polygon.count >= 3 {
         p.move(to: CGPoint(x: polygon[0].x, y: polygon[0].y))
@@ -247,7 +273,18 @@ enum MapRenderer {
       ctx.stroke(p, with: .color(color(YELLOW)), lineWidth: 2 / scale)
     }
 
-    drawAgents(world, into: &ctx, hairline: hairline, ink: ink)
+    // What the screen can actually show, in world units, as a circle around
+    // the camera rather than a rectangle: the view rotates, so the corners of
+    // an axis-aligned box would swing in and out of shot as it turned and
+    // pedestrians would pop. The half-diagonal is the radius that box never
+    // leaves, so this is conservative at every angle.
+    let reach = (size.width * size.width + size.height * size.height).squareRoot()
+      / (2 * scale)
+    let visible = CGRect(x: vp.targetX - reach, y: vp.targetY - reach,
+                         width: reach * 2, height: reach * 2)
+
+    drawAgents(world, into: &ctx, hairline: hairline, ink: ink, visible: visible)
+    drawDoorSides(world, cache.doors, into: &ctx, scale: scale, ink: ink)
     drawPreview(world, into: &ctx, hairline: hairline, scale: scale, ink: ink)
 
     // Screen space: a label drawn in world units would grow with the zoom.
@@ -260,11 +297,109 @@ enum MapRenderer {
     }
   }
 
+  /// The freehand cursor: three humps through the point it marks.
+  ///
+  /// Centred on its own point rather than hanging below it, so the thing under
+  /// the cursor is the middle of the mark -- a wall starts where you press, and
+  /// a cursor that lied about that by half its height would be the offset bug
+  /// this app has already had once.
+  private static func squiggle(at: Point, size: Double) -> Path {
+    // A quadratic curve reaches half its control offset, so the humps stand
+    // `h / 2` off the line: this is a mark 2w wide and about h tall.
+    let w = size, h = size * 1.1
+    var p = Path()
+    p.move(to: CGPoint(x: at.x - w, y: at.y))
+    p.addQuadCurve(to: CGPoint(x: at.x - w / 3, y: at.y),
+                   control: CGPoint(x: at.x - w * 2 / 3, y: at.y - h))
+    p.addQuadCurve(to: CGPoint(x: at.x + w / 3, y: at.y),
+                   control: CGPoint(x: at.x, y: at.y + h))
+    p.addQuadCurve(to: CGPoint(x: at.x + w, y: at.y),
+                   control: CGPoint(x: at.x + w * 2 / 3, y: at.y - h))
+    return p
+  }
+
+  /// The face a door sends its crowd out of, and -- once a door has been
+  /// clicked -- the four it could.
+  ///
+  /// Drawn over the crowd rather than under it: a doorstep is where people
+  /// appear, so a mark under them is a mark nobody can see the moment the door
+  /// starts working.
+  ///
+  /// **Not in `RenderCache`.** These follow what has been clicked and what the
+  /// pointer is over, neither of which bumps `worldRevision`, so cached wall
+  /// paths would either stick or be thrown away for a shape that costs nothing
+  /// to rebuild.
+  private static func drawDoorSides(_ world: WalkyWorld, _ doors: [Wall],
+                                    into ctx: inout GraphicsContext,
+                                    scale: Double, ink: RGB) {
+    guard !doors.isEmpty else { return }
+    let picked = world.pickedDoor
+    // Only ever the picked door's, so this is the highlight and not the offer.
+    let under = world.hoverWorld.flatMap { world.doorFace(at: $0) }
+    let thick = 7 / scale
+    let dashed = StrokeStyle(lineWidth: 2 / scale, dash: [6 / scale, 4 / scale])
+
+    for door in doors {
+      let isPicked = picked?.id == door.id
+      for step in world.doorFaces(door) {
+        let slab = bar(step, thick: thick)
+        if step.isChosen {
+          // Filled in the door's own colour and pointing outward: this is the
+          // way *out*, which is the opposite of what a bar across a doorway
+          // usually means, so the chevron is doing the talking.
+          ctx.fill(slab, with: .color(color(door.color)))
+          ctx.stroke(slab, with: .color(color(ink)), lineWidth: 1 / scale)
+          ctx.stroke(chevron(step, scale: scale),
+                     with: .color(color(ink)), lineWidth: 2 / scale)
+        } else if isPicked {
+          // On offer: the outline of the mark that clicking would draw.
+          ctx.stroke(slab, with: .color(color(ink, 0.55)), style: dashed)
+        }
+        guard isPicked, under?.index == step.index else { continue }
+        ctx.stroke(slab, with: .color(color(ORANGE)), lineWidth: 2 / scale)
+      }
+    }
+  }
+
+  /// An arrow head on a face, pointing the way its crowd leaves.
+  private static func chevron(_ step: WalkyWorld.DoorStep, scale: Double) -> Path {
+    let (fx, fy) = (step.facing.x, step.facing.y)
+    let (ax, ay) = (-fy, fx)
+    let arm = 6 / scale, out = 12 / scale
+    // From the middle of the face, outward.
+    let tip = CGPoint(x: step.face.x + fx * out, y: step.face.y + fy * out)
+    var p = Path()
+    p.move(to: CGPoint(x: tip.x - fx * arm + ax * arm, y: tip.y - fy * arm + ay * arm))
+    p.addLine(to: tip)
+    p.addLine(to: CGPoint(x: tip.x - fx * arm - ax * arm, y: tip.y - fy * arm - ay * arm))
+    return p
+  }
+
+  /// One side of a door as a slab standing on it.
+  ///
+  /// The inner edge sits *on* the face, so there is no gap between the block
+  /// and the thing shutting it, and the slab is the door's own width across.
+  private static func bar(_ step: WalkyWorld.DoorStep, thick: Double) -> Path {
+    let (fx, fy) = (step.facing.x, step.facing.y)
+    // Across the facing, not along it.
+    let (ax, ay) = (-fy, fx)
+    let h = step.half
+    var p = Path()
+    p.move(to: CGPoint(x: step.face.x + ax * h, y: step.face.y + ay * h))
+    p.addLine(to: CGPoint(x: step.face.x - ax * h, y: step.face.y - ay * h))
+    p.addLine(to: CGPoint(x: step.face.x - ax * h + fx * thick,
+                          y: step.face.y - ay * h + fy * thick))
+    p.addLine(to: CGPoint(x: step.face.x + ax * h + fx * thick,
+                          y: step.face.y + ay * h + fy * thick))
+    p.closeSubpath()
+    return p
+  }
+
   /// Batched by packed colour: one fill per distinct colour rather than per
   /// agent. A freshly painted rainbow crowd is the worst case; a crowd aimed at
   /// a goal is two fills.
   private static func drawAgents(_ world: WalkyWorld, into ctx: inout GraphicsContext,
-                                 hairline: Double, ink: RGB) {
+                                 hairline: Double, ink: RGB, visible: CGRect) {
     let a = world.agents
     guard a.count > 0 else { return }
     let r = world.settings.pedestrianRadius
@@ -273,19 +408,36 @@ enum MapRenderer {
     // retreat rather than painted into the colour, as `app.ts` does: the goal's
     // colour has to come back when it tries again.
     let white = packRgb((255, 255, 255))
+    // Zoomed in on a corner of a big import, most of the crowd is off screen,
+    // and every one of them was still costing an `addEllipse` into a path that
+    // was then filled and stroked. `624aa9e` flagged this as missing.
+    let left = visible.minX - r, right = visible.maxX + r
+    let top = visible.minY - r, bottom = visible.maxY + r
     var byColor: [UInt32: Path] = [:]
+    var onScreen: [Int] = []
+    onScreen.reserveCapacity(a.count)
     for i in 0..<a.count {
       let x = Double(a.x[i]), y = Double(a.y[i])
+      if x < left || x > right || y < top || y > bottom { continue }
+      onScreen.append(i)
       byColor[a.fleeLeft[i] > 0 ? white : a.color[i], default: Path()].addEllipse(
         in: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
     }
-    // The white ring every pedestrian wears, from PedestrianPanel.drawPedestrian.
-    var all = Path()
     for (packed, path) in byColor {
       ctx.fill(path, with: .color(color(unpackRgb(packed))))
-      all.addPath(path)
     }
-    ctx.stroke(all, with: .color(color(ink)), lineWidth: hairline)
+    // The white ring every pedestrian wears, from PedestrianPanel.drawPedestrian.
+    //
+    // A second pass over the same paths rather than one stroke over a copy of
+    // them all: `all.addPath` rebuilt every ellipse in the crowd a second time,
+    // which doubled the per-frame path construction this batching exists to
+    // avoid. Stroking inside the fill loop would have been one pass, but it
+    // would also put one colour's rings under the next colour's fill, and the
+    // rings belong over the whole crowd.
+    let inkColor = color(ink)
+    for path in byColor.values {
+      ctx.stroke(path, with: .color(inkColor), lineWidth: hairline)
+    }
 
     // Who the next goal would apply to. A second ring outside the ink one
     // rather than a recoloured one: agents are batched into a single `Path` per
@@ -293,15 +445,19 @@ enum MapRenderer {
     // `scene.ts:283-285` does, deck.gl giving it away free -- would undo the
     // batching this method exists for. One extra pass, one extra stroke.
     var picked = Path()
-    for i in 0..<a.count where a.selected[i] != 0 {
+    for i in onScreen where a.selected[i] != 0 {
       let x = Double(a.x[i]), y = Double(a.y[i]), rr = r + hairline
       picked.addEllipse(in: CGRect(x: x - rr, y: y - rr, width: rr * 2, height: rr * 2))
     }
-    ctx.stroke(picked, with: .color(color(YELLOW)), lineWidth: hairline * 2)
+    // Nothing is lassoed most of the time, and this was issuing a stroke over
+    // an empty path every frame regardless.
+    if !picked.isEmpty {
+      ctx.stroke(picked, with: .color(color(YELLOW)), lineWidth: hairline * 2)
+    }
 
     if world.settings.showPersonalSpace {
       var rings = Path()
-      for i in 0..<a.count {
+      for i in onScreen {
         let s = Double(a.effectiveSpace[i])
         if s <= 0 { continue }
         let x = Double(a.x[i]), y = Double(a.y[i]), rr = r + s
@@ -337,10 +493,40 @@ enum MapRenderer {
       }
     }
 
-    if let rect = preview.pendingRect {
-      let r = CGRect(x: min(rect.0.x, rect.1.x), y: min(rect.0.y, rect.1.y),
-                     width: abs(rect.1.x - rect.0.x), height: abs(rect.1.y - rect.0.y))
-      ctx.stroke(Path(r), with: .color(color(ink)), style: dash)
+    // The block the generator tool is pointing at, marked as what clicking
+    // would make of it -- and the tool toggles, so that cuts both ways:
+    //
+    //   a plain block  -> the door's own dashed outline, over the solid fill
+    //                     the wall pass already drew. Dashed but still solid,
+    //                     because it is still a wall; drawn hollow it would be
+    //                     claiming to be a door already.
+    //   a door already -> a solid outline, the wall it would go back to.
+    //
+    // One rule either way: the preview is the thing you would get, in the
+    // language that thing is already drawn in.
+    if let id = preview.markingWallId, let wall = world.walls.first(where: { $0.id == id }) {
+      var p = Path()
+      for polygon in wall.polygons where polygon.count >= 3 {
+        p.move(to: CGPoint(x: polygon[0].x, y: polygon[0].y))
+        for q in polygon.dropFirst() { p.addLine(to: CGPoint(x: q.x, y: q.y)) }
+        p.closeSubpath()
+      }
+      let door = wall.generator != nil
+      ctx.stroke(p, with: .color(color(wall.color)),
+                 style: door ? StrokeStyle(lineWidth: 2 / scale)
+                             : StrokeStyle(lineWidth: 2 / scale,
+                                           dash: [7 / scale, 5 / scale]))
+    }
+
+    // Corners rather than a CGRect: on a turned map the box the tool is about
+    // to commit is square to the screen, which world space -- where this is
+    // drawn -- sees as a tilted quad. A CGRect could only draw its bounding box.
+    if let rect = preview.pendingRect, rect.count >= 3 {
+      var r = Path()
+      r.move(to: CGPoint(x: rect[0].x, y: rect[0].y))
+      for q in rect.dropFirst() { r.addLine(to: CGPoint(x: q.x, y: q.y)) }
+      r.closeSubpath()
+      ctx.stroke(r, with: .color(color(ink)), style: dash)
     }
 
     // The lasso, in yellow so it cannot be read as a wall being traced -- both
@@ -402,18 +588,48 @@ enum MapRenderer {
       endpoint(anchor, into: &ctx, scale: scale, ink: ink)
     }
 
-    if let ghost = preview.cursorGhost {
-      // Only ever drawn while a touch is down -- there is no hover on iOS, and
-      // a ghost parked at the last touch point is exactly the artefact to avoid.
+    // A ghost follows a *hovering* pointer only for the two tools whose mark
+    // answers "what happens if I click here" -- see `ToolId.ghostsOnHover`.
+    // `hoverWorld` is nil on every iOS frame, so the phone, where a ghost is
+    // only ever drawn under a finger already down, keeps all seven.
+    //
+    // A nil `activeTool` is let through: that is the scene generator's
+    // `transientPreview`, which is not a tool and not under anybody's cursor.
+    let ghostWelcome = world.hoverWorld == nil || (world.activeTool?.ghostsOnHover ?? true)
+    if let ghost = preview.cursorGhost, world.mouseWorld != nil, ghostWelcome {
+      // Only ever drawn where there is a pointer to draw it under: a touch on
+      // iOS, a hovering cursor on a Mac. A ghost parked at the last touch
+      // point -- or left behind when the cursor leaves the window -- is
+      // exactly the artefact to avoid.
       let s = ghost.size / scale
       let box = CGRect(x: ghost.at.x - s, y: ghost.at.y - s, width: s * 2, height: s * 2)
+      // The map's turn taken back out, about the ghost's own point: this is a
+      // cursor, sized in screen points and standing for the shape the tool is
+      // about to draw -- and that shape is square to the screen. Left in world
+      // space it would sit crooked under the finger on a turned map while the
+      // box it previews came out straight.
+      var g = ctx
+      g.translateBy(x: ghost.at.x, y: ghost.at.y)
+      g.rotate(by: .radians(-world.viewport.rotation))
+      g.translateBy(x: -ghost.at.x, y: -ghost.at.y)
       switch ghost.kind {
       case .square, .eraser:
-        ctx.stroke(Path(box), with: .color(color(ink)), lineWidth: hairline)
+        g.stroke(Path(box), with: .color(color(ink)), lineWidth: hairline)
       case .frame:
-        ctx.stroke(Path(box), with: .color(color(ink)), lineWidth: 3 / scale)
-      case .target, .squiggle:
-        ctx.stroke(Path(ellipseIn: box), with: .color(color(ORANGE)), lineWidth: 2 / scale)
+        g.stroke(Path(box), with: .color(color(ink)), lineWidth: 3 / scale)
+      case .target:
+        // A ring, for the three tools that *aim* at something already on the
+        // map: the goal, the door and the measure.
+        g.stroke(Path(ellipseIn: box), with: .color(color(ORANGE)), lineWidth: 2 / scale)
+      case .squiggle:
+        // Not a ring, and this is the reason: the wall tool's ghost was a
+        // 14-unit circle and a pedestrian is a filled 13-unit one, so the
+        // cursor for drawing a wall was a pedestrian-sized O. It read as "you
+        // are about to drop somebody" -- which is the tool two cells along.
+        // Nothing else in the app is a scribble, and it is what the tool's own
+        // cell wears.
+        g.stroke(squiggle(at: ghost.at, size: s),
+                 with: .color(color(ORANGE)), lineWidth: 2 / scale)
       }
     }
   }

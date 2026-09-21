@@ -13,7 +13,9 @@ import Foundation
 @MainActor
 private final class RecordingTool: Tool {
   let id = ToolId.wall
-  enum Event: Equatable { case down(Point), move(Point), up(Point), doubleTap(Point), cancel }
+  enum Event: Equatable {
+    case down(Point), move(Point), up(Point), doubleTap(Point), cancel, left
+  }
   var events: [Event] = []
 
   func onPointerDown(_ e: PointerInfo, _ ctx: ToolContext) { events.append(.down(e.world)) }
@@ -21,6 +23,7 @@ private final class RecordingTool: Tool {
   func onPointerUp(_ e: PointerInfo, _ ctx: ToolContext) { events.append(.up(e.world)) }
   func onDoubleTap(_ e: PointerInfo, _ ctx: ToolContext) { events.append(.doubleTap(e.world)) }
   func cancel() { events.append(.cancel) }
+  func pointerLeft() { events.append(.left) }
   func preview() -> ToolPreview { .empty }
 }
 
@@ -29,6 +32,7 @@ private final class FakeHost: PointerHost {
   var viewport = Viewport()
   var tool: Tool?
   var mouseWorld: Point?
+  var hoverWorld: Point?
   var renders = 0
   var freePans = 0
   var idleTaps = 0
@@ -42,13 +46,14 @@ private final class FakeHost: PointerHost {
 
   func requestRender() { renders += 1 }
   func pannedWithoutTool() { freePans += 1 }
-  func tappedWithoutTool() { idleTaps += 1 }
+  var tappedAt: Point?
+  func tappedWithoutTool(at: Point) { idleTaps += 1; tappedAt = at }
 
   lazy var toolContext: ToolContext = ToolContext(
     addWall: { _, _ in true }, addWallShape: { _, _ in true },
     settings: { SettingsSnapshot(pedestrianRadius: 13, personalSpace: 40,
                                  brushSize: 1, borderThickness: 12) },
-    pedestrianBlock: { _, _ in [] }, addPedestrians: { _ in },
+    pedestrianBlock: { _, _ in [] }, addPedestrians: { _ in [] },
     setGoalAt: { _ in true }, markGenerator: { _ in true },
     selectPedestriansIn: { _ in 0 }, selectionCount: { 0 },
     clearSelection: {}, standablePoint: { $0 }, deactivateTool: {},
@@ -512,5 +517,200 @@ struct PointerRotationTests {
     // version of the assertion the pinch already makes.
     #expect(!host.recorder.events.contains { if case .move = $0 { return true }; return false })
     #expect(host.viewport.rotation != 0)
+  }
+}
+
+/// The gestures that arrive already recognised, which is the only kind a Mac
+/// has: an iPad app on a Mac never sees a second touch, so before these the
+/// map there could not be zoomed or turned at all.
+@Suite("A trackpad's pinch and twist")
+@MainActor
+struct IndirectGestureTests {
+  @Test("a pinch zooms the map by the ratio it reports")
+  func pinchZooms() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+
+    r.pinched(at: Point(200, 150), by: 2)
+    #expect(abs(host.viewport.scale - 2) < 1e-9)
+    // Reported as the change since the last call, so two halves make a double.
+    r.pinched(at: Point(200, 150), by: 0.5)
+    #expect(abs(host.viewport.scale - 1) < 1e-9)
+  }
+
+  @Test("a twist turns the map, with no slop to break through first")
+  func twistTurns() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+
+    // Less than ROTATE_SLOP: two fingers would still be inside the dead zone,
+    // a recogniser has already made up its mind.
+    r.twisted(at: Point(200, 150), by: 0.1)
+    #expect(abs(host.viewport.rotation - 0.1) < 1e-9)
+  }
+
+  @Test("the point under the gesture stays under it")
+  func anchorHolds() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+    let anchor = Point(80, 220)
+    let before = host.viewport.screenToWorld(anchor)
+
+    r.pinched(at: anchor, by: 1.8)
+    r.twisted(at: anchor, by: 0.4)
+
+    let after = host.viewport.screenToWorld(anchor)
+    #expect(abs(after.x - before.x) < 1e-6)
+    #expect(abs(after.y - before.y) < 1e-6)
+  }
+
+  @Test("fingers on the glass keep the gesture to themselves")
+  func fingersWin() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+    r.began(A, at: Point(100, 100))
+    r.began(B, at: Point(200, 100))
+    let level = host.viewport.zoomLevel
+    let spin = host.viewport.rotation
+
+    // A recogniser watching the same two fingers would zoom the map twice.
+    r.pinched(at: Point(150, 100), by: 2)
+    r.twisted(at: Point(150, 100), by: 0.4)
+    #expect(host.viewport.zoomLevel == level)
+    #expect(host.viewport.rotation == spin)
+  }
+
+  @Test("the end of one puts a nearly-straight map straight")
+  func endSnapsNorth() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+
+    r.twisted(at: Point(200, 150), by: 0.05)
+    r.indirectGestureEnded()
+    #expect(host.viewport.rotation == 0)
+
+    // A twist meant on purpose survives it.
+    r.twisted(at: Point(200, 150), by: 0.6)
+    r.indirectGestureEnded()
+    #expect(abs(host.viewport.rotation - 0.6) < 1e-9)
+  }
+}
+
+/// What a Mac has and a touchscreen does not: a pointer with no button down,
+/// and a wheel.
+@Suite("A pointer that is not a finger")
+@MainActor
+struct MacPointerTests {
+  @Test("a hover reaches the tool with no buttons, so nothing is drawn")
+  func hoverIsNotADrag() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+
+    r.hovered(at: Point(140, 120))
+    // Delivered, because the ghost under the cursor is what the tools draw
+    // from -- and delivered as a *move with no button*, which is the whole
+    // difference between a hover and painting a line of pedestrians.
+    #expect(host.recorder.events == [.move(host.viewport.screenToWorld(Point(140, 120)))])
+    #expect(host.mouseWorld != nil)
+  }
+
+  @Test("a hover while a button is down is left to the drag")
+  func hoverYieldsToTheDrag() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+    r.began(A, at: Point(100, 100))
+    r.moved(A, to: Point(120, 100))
+    let so_far = host.recorder.events.count
+
+    r.hovered(at: Point(300, 300))
+    #expect(host.recorder.events.count == so_far)
+  }
+
+  @Test("only a hover is a hover")
+  func hoverWorldIsHoverOnly() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+
+    // The one thing that gates the doorstep controls, and it has to be nil on a
+    // touchscreen *by construction* rather than by policy: nothing below
+    // writes it, and on iOS `hovered` is never called at all.
+    r.began(A, at: Point(100, 100))
+    r.moved(A, to: Point(120, 100))
+    #expect(host.hoverWorld == nil)
+    r.ended(A, at: Point(120, 100))
+    #expect(host.hoverWorld == nil)
+
+    r.hovered(at: Point(140, 120))
+    #expect(host.hoverWorld != nil)
+    // It survives the click it is about to be used by: down, then up.
+    r.began(A, at: Point(140, 120))
+    #expect(host.hoverWorld != nil)
+    r.ended(A, at: Point(140, 120))
+    #expect(host.hoverWorld != nil)
+
+    r.hoverEnded()
+    #expect(host.hoverWorld == nil)
+    // And the *tool* is told, which clearing the two points above does not do:
+    // only the cursor ghost was ever gated on them, so everything else a tool
+    // draws under the pointer stayed on screen without this.
+    #expect(host.recorder.events.contains(.left))
+  }
+
+  @Test("an idle tap says where it landed")
+  func idleTapCarriesThePoint() {
+    let host = FakeHost()
+    host.tool = nil
+    let r = PointerRouter(host: host)
+
+    r.began(A, at: Point(200, 150))
+    r.ended(A, at: Point(203, 152))
+    #expect(host.idleTaps == 1)
+    // The world needs the point to tell a click on a doorstep control from a
+    // tap on bare ground.
+    let landed = try! #require(host.tappedAt)
+    let expected = host.viewport.screenToWorld(Point(203, 152))
+    #expect(abs(landed.x - expected.x) < 1e-9)
+    #expect(abs(landed.y - expected.y) < 1e-9)
+  }
+
+  @Test("the pointer leaving takes the ghost with it")
+  func hoverEndsClean() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+
+    r.hovered(at: Point(140, 120))
+    r.hoverEnded()
+    // `MapRenderer` draws the cursor ghost only where this is set, so clearing
+    // it is what stops a ghost sitting in the window after the cursor has gone.
+    #expect(host.mouseWorld == nil)
+  }
+
+  @Test("a wheel zooms about the pointer, in the original's own notches")
+  func wheelZooms() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+    let at = Point(120, 90)
+    let under = host.viewport.screenToWorld(at)
+
+    r.scrolled(at: at, notches: -3)
+    #expect(host.viewport.zoomLevel == -3)
+    // Whatever was under the cursor is still under it -- the property every
+    // zoom in this app has.
+    let now = host.viewport.screenToWorld(at)
+    #expect(abs(now.x - under.x) < 1e-9)
+    #expect(abs(now.y - under.y) < 1e-9)
+  }
+
+  @Test("a two-finger scroll pans by the delta it is given")
+  func scrollPans() {
+    let host = FakeHost()
+    let r = PointerRouter(host: host)
+    let before = (host.viewport.targetX, host.viewport.targetY)
+
+    r.panned(by: 30, -12)
+    // The same direction the two-finger branch of `moved` pans in: the map
+    // travels with the fingers.
+    #expect(host.viewport.targetX == before.0 - 30)
+    #expect(host.viewport.targetY == before.1 + 12)
   }
 }

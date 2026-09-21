@@ -100,6 +100,13 @@ public final class GoalTool: Tool {
     ctx.deactivateTool()
   }
 
+  /// The ring and the fan of lines to it both hang off `mouse`, and a fan of
+  /// lines from every pedestrian to a point the pointer left an hour ago is the
+  /// worst of the things a hover can leave behind.
+  public func pointerLeft() {
+    mouse = nil
+  }
+
   public func cancel() {
     mouse = nil
     color = nil

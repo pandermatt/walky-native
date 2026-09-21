@@ -5,5 +5,9 @@ xcuserdata/
 .swiftpm/
 App/Info.plist
 Stickers/Info.plist
+# Both written by `xcodegen generate` from project.yml, like the two above:
+# the plist from `info:` and the entitlements from `entitlements:`.
+Mac/Info.plist
+Mac/Walky.entitlements
 *.xcodeproj/
 build/

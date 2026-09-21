@@ -7,6 +7,19 @@ public enum ToolId: String, CaseIterable, Sendable {
   // Present in the web app, not in v1: select, shift, erase, text, generator.
 }
 
+extension ToolId {
+  /// Whether this tool's cursor ghost follows a pointer that is merely
+  /// *hovering* -- which is a macOS question, because a touchscreen never
+  /// hovers and a ghost there is only ever drawn under a finger already down.
+  ///
+  /// Two of the seven, and the rule is what the ghost is *for*: these are the
+  /// ones whose mark answers "what happens if I click here". The pedestrian
+  /// block shows which spots are actually free, and the goal's ring and lines
+  /// show what would be aimed where. The rest were marking where the cursor
+  /// was, which the cursor was already doing.
+  public var ghostsOnHover: Bool { self == .pedestrian || self == .goal }
+}
+
 /// The shape drawn under the pointer to say what the active tool will do.
 ///
 /// Replaces the original's 32x32 PNG cursors, which could not show a tool's
@@ -42,7 +55,13 @@ public struct ToolPreview: Sendable {
   public var pendingWallPoints: [Point] = []
   /// True while tracing freehand: draw as a closing outline, not placed vertices.
   public var pendingWallTracing = false
-  public var pendingRect: (Point, Point)?
+  /// The box being dragged, as its four corners rather than two.
+  ///
+  /// Two opposite corners were enough while every box was axis-aligned. A box
+  /// drawn on a turned map is square to the *screen*, which world space sees as
+  /// a tilted quad, and two corners cannot say which tilt -- so the tool hands
+  /// over the shape it is about to commit rather than the drag it came from.
+  public var pendingRect: [Point]?
   /// Arbitrary outlines to preview, e.g. the bars of a border frame.
   public var pendingPolygons: [[Point]] = []
   /// Draw the pending outlines as a warning: the shape would be unusable.
@@ -50,6 +69,12 @@ public struct ToolPreview: Sendable {
   /// Where pedestrians would land if the brush fired now.
   public var pendingPedestrians: [Point] = []
   public var cursorGhost: CursorGhost?
+  /// A wall the pointer is over that the tool would turn into something else.
+  ///
+  /// The generator's whole preview, and a better one than the ring it replaced:
+  /// a mark at the cursor says where the cursor is, which the cursor was
+  /// already saying. Naming the block says what the click would do to *it*.
+  public var markingWallId: Int?
   public var targetLines: TargetLines?
   /// A point a two-tap tool has already placed, drawn as the endpoint it is
   /// about to become.
@@ -120,7 +145,15 @@ public struct ToolContext {
   public var settings: () -> SettingsSnapshot
   /// Legal positions in a block centred on `at`, for placement and preview.
   public var pedestrianBlock: (Point, Int?) -> [Point]
-  public var addPedestrians: (Point) -> Void
+  /// Paints a block of bodies and answers the spots it filled.
+  ///
+  /// It does **not** checkpoint: a drag is one edit, so the tool takes one
+  /// checkpoint on the press. The spots come back so the caller does not have
+  /// to ask `pedestrianBlock` the same question twice in one event.
+  public var addPedestrians: (Point) -> [Point]
+  /// Takes an undo checkpoint, for a tool whose gesture is one edit made of
+  /// many events.
+  public var checkpoint: () -> Void
   /// Marks the wall under a point as a goal; false when there is no wall there.
   public var setGoalAt: (Point) -> Bool
   /// Turns the block under a point into a generator, or back into a plain
@@ -145,8 +178,14 @@ public struct ToolContext {
   public var requestRender: () -> Void
   /// Colour of the wall under a point, if any -- used to tint the goal preview.
   public var colorAt: (Point) -> RGB?
+  /// The wall under a point, by id -- what the generator previews. Beside
+  /// `colorAt`, which asks the same question of the same wall.
+  public var wallIdAt: (Point) -> Int?
   /// World units per screen point, so tolerances can be expressed in points.
   public var worldPerPixel: () -> Double
+  /// How far the map is turned on screen, in radians. What squares a dragged
+  /// box to the glass instead of to world space; see `orientedRectangle`.
+  public var viewRotation: () -> Double
   /// Walky's walk from a to b, stored on the world and drawn until replaced.
   public var measure: (Point, Point) -> Void
 
@@ -155,7 +194,8 @@ public struct ToolContext {
     addWallShape: @escaping ([[Point]], WallOptions?) -> Bool,
     settings: @escaping () -> SettingsSnapshot,
     pedestrianBlock: @escaping (Point, Int?) -> [Point],
-    addPedestrians: @escaping (Point) -> Void,
+    addPedestrians: @escaping (Point) -> [Point],
+    checkpoint: @escaping () -> Void = {},
     setGoalAt: @escaping (Point) -> Bool,
     markGenerator: @escaping (Point) -> Bool,
     selectPedestriansIn: @escaping ([Point]) -> Int,
@@ -166,7 +206,14 @@ public struct ToolContext {
     notify: @escaping (String) -> Void,
     requestRender: @escaping () -> Void,
     colorAt: @escaping (Point) -> RGB?,
+    // Defaulted, like `viewRotation`: a caller with no map to ask -- every
+    // test fake that does not care -- means a point with no wall under it.
+    wallIdAt: @escaping (Point) -> Int? = { _ in nil },
     worldPerPixel: @escaping () -> Double,
+    // Defaulted alone among the seventeen: a caller with no camera to ask --
+    // every test fake, today -- means a map nobody has turned, and that is the
+    // behaviour every one of them was written against.
+    viewRotation: @escaping () -> Double = { 0 },
     measure: @escaping (Point, Point) -> Void
   ) {
     self.addWall = addWall
@@ -174,6 +221,7 @@ public struct ToolContext {
     self.settings = settings
     self.pedestrianBlock = pedestrianBlock
     self.addPedestrians = addPedestrians
+    self.checkpoint = checkpoint
     self.setGoalAt = setGoalAt
     self.markGenerator = markGenerator
     self.selectPedestriansIn = selectPedestriansIn
@@ -184,7 +232,9 @@ public struct ToolContext {
     self.notify = notify
     self.requestRender = requestRender
     self.colorAt = colorAt
+    self.wallIdAt = wallIdAt
     self.worldPerPixel = worldPerPixel
+    self.viewRotation = viewRotation
     self.measure = measure
   }
 }
@@ -200,7 +250,19 @@ public protocol Tool: AnyObject {
   func onDoubleTap(_ e: PointerInfo, _ ctx: ToolContext)
   /// Abandon anything in progress, e.g. on a second finger or a tool switch.
   func cancel()
+  /// The pointer has left the map, so anything drawn *under* it should go.
+  ///
+  /// Not `cancel()`, which throws away what has been committed: leaving the
+  /// window with one corner of a rectangle already placed must not abandon the
+  /// rectangle, only stop the other corner following a pointer that is no
+  /// longer there. Nothing on iOS ever calls this -- see `ToolId.ghostsOnHover`.
+  func pointerLeft()
   func preview() -> ToolPreview
+}
+
+extension Tool {
+  /// Most tools hold nothing that a pointer leaving should clear.
+  public func pointerLeft() {}
 }
 
 /// The port of TypeScript's optional methods.

@@ -3,10 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="A pedestrian simulator that runs entirely in the browser. Draw walls, mark a goal, paint a crowd, and watch it find its way." />
+    <meta name="description" content="Walky Lite: a pedestrian simulator that runs entirely in the browser, with nothing to install and no backend behind it. Draw walls, mark a goal, paint a crowd, and watch it find its way." />
     <meta name="theme-color" content="#1E1E1E" />
     <link rel="icon" href="../images/icon.png" />
     <link rel="manifest" href="../manifest.webmanifest" />
+    <!-- The native app, offered from the page that is most often shared: a
+         share link opens here, not on the landing page. -->
+    <meta name="apple-itunes-app" content="app-id=6811090126" />
     <!-- iOS reads none of the manifest: the home-screen icon, the app name and
          the standalone display mode each need their own tag.
 
@@ -19,9 +22,9 @@
     <link rel="apple-touch-icon" href="../images/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Walky" />
+    <meta name="apple-mobile-web-app-title" content="Walky Lite" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-    <title>Walky</title>
+    <title>Walky Lite — the pedestrian simulator in your browser</title>
 
     <!--
       Absolute URLs, unlike every other asset reference on this page.
@@ -33,10 +36,10 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Walky" />
     <meta property="og:url" content="https://walky.ch/demo/" />
-    <meta property="og:title" content="Walky - a pedestrian simulator in the browser" />
+    <meta property="og:title" content="Walky Lite — the pedestrian simulator in your browser" />
     <meta
       property="og:description"
-      content="A pedestrian simulator that runs entirely in the browser. Draw walls, mark a goal, paint a crowd, and watch it find its way."
+      content="The whole simulation, running in the browser with nothing to install. Draw walls, mark a goal, paint a crowd, and watch it find its way."
     />
     <meta property="og:image" content="https://walky.ch/images/og.png" />
     <meta property="og:image:type" content="image/png" />
@@ -48,6 +51,14 @@
     />
     <!-- Without summary_large_image, X crops the picture to a small square. -->
     <meta name="twitter:card" content="summary_large_image" />
+    <!-- Spelt out rather than left to fall back on og:*. Most readers do fall
+         back, and the ones that do not show a bare URL. -->
+    <meta name="twitter:title" content="Walky Lite — the pedestrian simulator in your browser" />
+    <meta
+      name="twitter:description"
+      content="The whole simulation, running in the browser with nothing to install. Draw walls, mark a goal, paint a crowd, and watch it find its way."
+    />
+    <meta name="twitter:image" content="https://walky.ch/images/og.png" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #1E1E1E; }
       /* Without this Safari starts a text/element drag from the canvas and swaps

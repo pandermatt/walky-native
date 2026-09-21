@@ -6,3 +6,4 @@ ios/.build
 ios/App/DerivedData
 xcuserdata
 web/wallpapers
+.claude/worktrees
