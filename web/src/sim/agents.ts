@@ -1,7 +1,7 @@
 import { randomBrightColor, BLACK, type RGB } from '../palette';
 import { distance, type Point } from './geometry';
 import {
-  Behaviour, SQRT2, interactionReach, paceScale, crowdPace, STALL_PROGRESS,
+  Behaviour, SQRT2, interactionReach, paceScale, crowdPace, STALL_PROGRESS, WANDER_PATIENCE,
   surrenderSteps, SURRENDER_FROM, RELIEF, FLEE_STEPS,
 } from './behaviour';
 import type { Navigation } from './navigation';
@@ -589,10 +589,27 @@ export class Agents {
     for (let i = 0; i < this.count; i++) {
       if (this.arrived[i]) continue;
       const goalId = this.goal[i];
-      if (goalId < 0 || !nav.hasGoal(goalId)) continue;
+      // Nowhere to be is not the same as nothing to do. A pedestrian with no
+      // goal used to be skipped here, before the step loop below ever saw it,
+      // which is why a crowd painted without a goal stood perfectly still --
+      // not jiggling, not deciding, simply never asked. Now it strolls: see
+      // `Behaviour.wanderWaypoint`, which hands back somewhere to go in the
+      // same shape the navigation does, so everything below this line treats a
+      // stroller exactly as it treats anybody else.
+      //
+      // A goal that has gone missing is still skipped, and deliberately. That
+      // is a pedestrian mid-edit -- a wall deleted a frame ago, the id not yet
+      // cleared -- and the right thing for one tick is to wait for the state to
+      // settle, not to wander off.
+      const wandering = goalId < 0;
+      if (!wandering && !nav.hasGoal(goalId)) continue;
 
       const here: Point = [this.x[i], this.y[i]];
-      if (nav.hasArrived(here, goalId, radius + 1)) {
+      // A stroller cannot arrive: there is no goal hull to be near, and its
+      // destination is a point it walks onto and then replaces. Skipped rather
+      // than left to answer false on its own, because answering costs a scan of
+      // every obstacle on the map.
+      if (!wandering && nav.hasArrived(here, goalId, radius + 1)) {
         this.markArrived(i);
         continue;
       }
@@ -641,6 +658,12 @@ export class Agents {
       // measure of how packed it is standing.
       const own = speed * paceScale(this.trait[i]) * crowdPace(this.density[i]);
 
+      // A stroll that has stopped getting anywhere is over. `stalled` is in the
+      // hash the destination is drawn from, so dropping the waypoint here draws
+      // a genuinely different one rather than the same wall again -- which is
+      // the whole of how a stroller gets out of a corner.
+      if (wandering && this.stalled[i] >= WANDER_PATIENCE) this.hasWaypoint[i] = 0;
+
       let left = own;
       let stepTaken = true;
       while (left > 1e-6 && stepTaken) {
@@ -657,7 +680,9 @@ export class Agents {
         }
 
         if (!this.hasWaypoint[i]) {
-          const next = nav.nextWaypoint([this.x[i], this.y[i]], goalId);
+          const next = wandering
+            ? behaviour.wanderWaypoint(i)
+            : nav.nextWaypoint([this.x[i], this.y[i]], goalId);
           if (!next) {
             // No route: jiggle. Either it is embedded in a wall's expanded hull
             // and works its way out, or the goal is genuinely unreachable and it
@@ -704,7 +729,7 @@ export class Agents {
         // Close enough to the waypoint: take the next one.
         if (distance([this.x[i], this.y[i]], target) <= 1) this.hasWaypoint[i] = 0;
 
-        if (nav.hasArrived([this.x[i], this.y[i]], goalId, radius + 1)) {
+        if (!wandering && nav.hasArrived([this.x[i], this.y[i]], goalId, radius + 1)) {
           this.markArrived(i);
           break;
         }

@@ -20,10 +20,10 @@ struct FixtureTests {
   @Test("every fixture on disk parses, and its trailer checksum verifies")
   func allParse() throws {
     let (graphs, traces) = try FixtureSet.load(from: fixturesDir())
-    // 5 graph maps + 7 recorded runs. If this drops, a fixture went missing:
+    // 5 graph maps + 8 recorded runs. If this drops, a fixture went missing:
     //   npx vite-node tools/goldenTrace.ts
     #expect(graphs.count == 5)
-    #expect(traces.count == 7)
+    #expect(traces.count == 8)
     // The initialisers throw on a checksum mismatch, so reaching the end is
     // the assertion.
     for g in graphs { _ = try GraphFixture(contentsOf: g.url) }

@@ -18,9 +18,18 @@ const R = 13;
 
 /**
  * A barrier with two gaps: a short channel straight toward the goal, and a
- * long detour further up. The short gap is mostly plugged with goal-less
- * standing pedestrians -- bodies the driver never moves -- so it passes only
- * a trickle, and the detour is where the throughput is.
+ * long detour further up. The short gap is mostly plugged with standing
+ * pedestrians -- bodies the driver never moves -- so it passes only a trickle,
+ * and the detour is where the throughput is.
+ *
+ * The plug used to be goal-less pedestrians, which the driver skipped outright.
+ * They stroll now (`Behaviour.wanderWaypoint`), and a plug that wanders off is
+ * no plug, so they are aimed at a wall that is not a goal instead: the
+ * navigation holds no field for it, `hasGoal` is false, and the driver leaves
+ * them exactly where they stand. That is a real state rather than a trick --
+ * it is what a pedestrian is between a goal flag being cleared and its own id
+ * catching up -- and it is the one remaining way to say "a body that does not
+ * walk", which is what this fixture needs and nothing else here provides.
  */
 function world() {
   const barrierTop = makeWall([rectanglePolygon([0, -420], [40, -50])]);
@@ -32,17 +41,18 @@ function world() {
   goal.isGoal = true;
   const nav = new Navigation();
   nav.rebuild([barrierTop, barrierMid, barrierBot, roof, floor, goal], R);
-  return { nav, goal };
+  return { nav, goal, inert: barrierTop };
 }
 
 function run(recost: boolean, ticks: number): { arrived: number; positions: number[] } {
-  const { nav, goal } = world();
+  const { nav, goal, inert } = world();
   const agents = new Agents();
   const hash = new SpatialHash();
 
   for (let cx = -1; cx <= 1; cx++) {
     for (let yy = -49; yy <= 49; yy += 2 * R) {
-      agents.add([20 + cx * 2 * R, yy]);
+      const k = agents.add([20 + cx * 2 * R, yy]);
+      agents.setGoal(k, inert.id, inert.color);
     }
   }
   for (let i = 0; i < 8; i++) {

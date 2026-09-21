@@ -237,10 +237,27 @@ public final class Agents {
     for i in 0..<count {
       if arrived[i] != 0 { continue }
       let goalId = Int(goal[i])
-      if goalId < 0 || !nav.hasGoal(goalId) { continue }
+      // Nowhere to be is not the same as nothing to do. A pedestrian with no
+      // goal used to be skipped here, before the step loop below ever saw it,
+      // which is why a crowd painted without a goal stood perfectly still --
+      // not jiggling, not deciding, simply never asked. Now it strolls: see
+      // `Behaviour.wanderWaypoint`, which hands back somewhere to go in the
+      // same shape the navigation does, so everything below this line treats a
+      // stroller exactly as it treats anybody else.
+      //
+      // A goal that has gone missing is still skipped, and deliberately. That
+      // is a pedestrian mid-edit -- a wall deleted a frame ago, the id not yet
+      // cleared -- and the right thing for one tick is to wait for the state to
+      // settle, not to wander off.
+      let wandering = goalId < 0
+      if !wandering && !nav.hasGoal(goalId) { continue }
 
       let here = Point(Double(x[i]), Double(y[i]))
-      if nav.hasArrived(here, goalId, radius + 1) {
+      // A stroller cannot arrive: there is no goal hull to be near, and its
+      // destination is a point it walks onto and then replaces. Skipped rather
+      // than left to answer false on its own, because answering costs a scan of
+      // every obstacle on the map.
+      if !wandering && nav.hasArrived(here, goalId, radius + 1) {
         markArrived(i)
         continue
       }
@@ -273,6 +290,12 @@ public final class Agents {
 
       let own = speed * paceScale(Double(trait[i])) * crowdPace(Double(density[i]))
 
+      // A stroll that has stopped getting anywhere is over. `stalled` is in the
+      // hash the destination is drawn from, so dropping the waypoint here draws
+      // a genuinely different one rather than the same wall again -- which is
+      // the whole of how a stroller gets out of a corner.
+      if wandering && Double(stalled[i]) >= WANDER_PATIENCE { hasWaypoint[i] = 0 }
+
       var left = own
       var stepTaken = true
       while left > 1e-6 && stepTaken {
@@ -287,7 +310,9 @@ public final class Agents {
         }
 
         if hasWaypoint[i] == 0 {
-          guard let next = nav.nextWaypoint(Point(Double(x[i]), Double(y[i])), goalId) else {
+          guard let next = wandering
+            ? behaviour.wanderWaypoint(i)
+            : nav.nextWaypoint(Point(Double(x[i]), Double(y[i])), goalId) else {
             // No route: jiggle. Either it is embedded in a wall's expanded hull
             // and works its way out, or the goal is genuinely unreachable.
             let escape = behaviour.escapeStep(i, radius, personalSpace)
@@ -325,7 +350,7 @@ public final class Agents {
 
         if distance(Point(Double(x[i]), Double(y[i])), target) <= 1 { hasWaypoint[i] = 0 }
 
-        if nav.hasArrived(Point(Double(x[i]), Double(y[i])), goalId, radius + 1) {
+        if !wandering, nav.hasArrived(Point(Double(x[i]), Double(y[i])), goalId, radius + 1) {
           markArrived(i)
           break
         }

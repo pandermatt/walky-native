@@ -1,6 +1,6 @@
 import { closestPointOnSegment, distance, pointInPolygon, type Point } from './geometry';
 import type { Obstacle } from './visibilityGraph';
-import type { Navigation } from './navigation';
+import type { Navigation, Waypoint } from './navigation';
 import type { SpatialHash } from './spatialHash';
 import type { Agents } from './agents';
 
@@ -497,6 +497,32 @@ const ESCAPE_X_SALT = 227;
 const ESCAPE_Y_SALT = 229;
 const RANDOM_DX_SALT = 307;
 const RANDOM_DY_SALT = 311;
+const WANDER_DX_SALT = 337;
+const WANDER_DY_SALT = 347;
+const WANDER_REACH_SALT = 349;
+
+/**
+ * How far a pedestrian with nowhere to be strolls before picking somewhere else:
+ * two metres to six, in this file's currency of pixels at 56 to the metre.
+ *
+ * Short enough that a room reads as people milling about in it rather than
+ * marching across it, and long enough that each leg is a walk -- under a metre
+ * and the redraw cadence dominates, which is the twitch this replaced.
+ */
+const WANDER_NEAR = 112;
+const WANDER_SPAN = 224;
+
+/**
+ * How long a stroller leans on something before choosing somewhere else: half a
+ * second, in the currency `stalled` is counted in.
+ *
+ * `stalled` climbs by one per tick that gains no ground and falls by two per
+ * tick that does, so thirty is a real half second of getting nowhere rather
+ * than one unlucky step. Short enough that a pedestrian pushed into a corner
+ * turns around while you are still watching it; long enough that squeezing past
+ * somebody in a doorway is not mistaken for a dead end.
+ */
+export const WANDER_PATIENCE = 30;
 
 /** The wobble of a pedestrian stuck for `stalled` ticks, keyed to where it stands. */
 function stuckWobble(x: number, y: number, stalled: number, salt: number): number {
@@ -1439,6 +1465,50 @@ export class Behaviour {
       }
     }
     return NO_STEP;
+  }
+
+  /**
+   * Somewhere to go for a pedestrian with no goal at all.
+   *
+   * Not a force, not a jiggle: an actual destination, handed back in the same
+   * shape `Navigation.nextWaypoint` uses, so the step loop cannot tell the
+   * difference and a stroller gets the whole walking machine -- nine-direction
+   * scoring, neighbour avoidance, sliding along walls, queueing -- rather than
+   * a special case that reimplements a worse version of it.
+   *
+   * Eight compass directions and a distance, all drawn from the same positional
+   * hash as every other decision here, so a run still replays tick for tick.
+   * Deliberately no trigonometry: the angle version of this needs `cos` and
+   * `sin`, and those are the two functions whose last bit is not guaranteed to
+   * agree between V8 and libm -- which is a whole shim's worth of trouble
+   * (`JSMath`) for a prettier distribution nobody can see.
+   *
+   * The draw keys on where the pedestrian stands, so the next leg is chosen
+   * from the end of this one and differs from it. `stalled` is in the hash too,
+   * which is what lets a stroller that has walked into something pick a
+   * different direction rather than lean on it for ever.
+   *
+   * Never nil, unlike `nextWaypoint`: there is always somewhere to stroll, and
+   * the `dx === 0 && dy === 0` nudge is what guarantees it. A target on top of
+   * the pedestrian would be arrived at instantly and redrawn from the same
+   * position with the same hash -- the same non-move, for ever.
+   */
+  wanderWaypoint(i: number): Waypoint {
+    const a = this.agents;
+    const x = a.x[i];
+    const y = a.y[i];
+    const stuck = a.stalled[i];
+    let dx = Math.floor(stuckWobble(x, y, stuck, WANDER_DX_SALT) * 3) - 1;
+    const dy = Math.floor(stuckWobble(x, y, stuck, WANDER_DY_SALT) * 3) - 1;
+    if (dx === 0 && dy === 0) dx = 1;
+    const reach = WANDER_NEAR + Math.floor(stuckWobble(x, y, stuck, WANDER_REACH_SALT) * WANDER_SPAN);
+    const point: Point = [x + dx * reach, y + dy * reach];
+    // The honest analogue of a cost to goal: how far there is left to walk.
+    // Every pedestrian with no goal shares the id -1, so the rank comparison in
+    // the shoving model reads them all as bound for the same place, and this is
+    // the number it compares. Strollers therefore give way to each other by how
+    // far each has left to stroll, which is as meaningful as it needs to be.
+    return { point, cost: distance(point, [x, y]), node: -1 };
   }
 
   /** Last resort when there is nowhere sensible to go. */

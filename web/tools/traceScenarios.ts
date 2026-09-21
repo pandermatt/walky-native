@@ -33,7 +33,11 @@ export interface WallSpec {
 }
 
 export interface BlockSpec {
-  /** Index into `walls` of the goal this block walks to. */
+  /**
+   * Index into `walls` of the goal this block walks to, or -1 for a block with
+   * no goal at all -- the strollers, who wander instead. `Conformance.swift`
+   * already understood a placement with no goal; this is the spec side of it.
+   */
   goal: number;
   cols: number;
   rows: number;
@@ -166,6 +170,28 @@ export const SCENARIOS: ScenarioSpec[] = [
     crowd: [{ goal: 2, cols: 10, rows: 8, x0: -420, y0: -119, pitch: 34 }],
   },
   {
+    name: 'stroll',
+    proves: 'wanderWaypoint: a crowd with no goal walks rather than standing still',
+    // The one fixture with no goal anywhere on the map. Before strollers
+    // existed this scenario would have been forty-eight pedestrians frozen in a
+    // lattice for six hundred ticks, which is exactly the bug it now guards:
+    // the hashed direction, the hashed distance, the half-second patience and
+    // the redraw at the end of each leg all have to land on the same bit in
+    // Swift as in V8, and nothing else here exercises one of them.
+    ticks: 600,
+    speed: 4,
+    personalSpace: 40,
+    // A closed room, so the walk has edges to find and slide along rather than
+    // an empty plane to diffuse across.
+    walls: [
+      { rects: [rect([-400, -300], [400, -250])], color: SLATE },
+      { rects: [rect([-400, 250], [400, 300])], color: SLATE },
+      { rects: [rect([-400, -300], [-350, 300])], color: SLATE },
+      { rects: [rect([350, -300], [400, 300])], color: SLATE },
+    ],
+    crowd: [{ goal: -1, cols: 8, rows: 6, x0: -140, y0: -85, pitch: 34 }],
+  },
+  {
     name: 'congestion',
     proves: 'recost, edgeSlow, and the goal round-robin order (navigation.ts:148)',
     // Two ways around a central block, one of them jammed by the crowd's own
@@ -235,12 +261,16 @@ export function buildScenario(spec: ScenarioSpec): BuiltScenario {
   const agents = new Agents();
   const hash = new SpatialHash();
   for (const b of spec.crowd) {
-    const goal = walls[b.goal];
+    const goal = b.goal >= 0 ? walls[b.goal] : null;
+    // White for a block with no goal, and not an arbitrary choice: it is what
+    // `Conformance.swift` restores one as, having no goal colour to take, and
+    // the two sides have to agree on every byte including this one.
+    const color: RGB = goal ? goal.color : [255, 255, 255];
     for (let i = 0; i < b.cols; i++) {
       for (let j = 0; j < b.rows; j++) {
         // The colour is passed rather than defaulted: the default is random.
-        const k = agents.add([b.x0 + i * b.pitch, b.y0 + j * Math.abs(b.pitch)], goal.color);
-        agents.setGoal(k, goal.id, goal.color);
+        const k = agents.add([b.x0 + i * b.pitch, b.y0 + j * Math.abs(b.pitch)], color);
+        if (goal) agents.setGoal(k, goal.id, goal.color);
       }
     }
   }
