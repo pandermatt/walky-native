@@ -203,6 +203,22 @@ struct RootView: View {
     // "the bar is centred" and "the bar happens to be as wide as the screen".
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .animation(.snappy(duration: 0.2), value: model.notice.message)
+    // The console's arrival, back again after being cut -- but here, on the
+    // chrome, rather than at the root where it was.
+    //
+    // At the root it was keyed on `divided` and applied to everything below
+    // it, `ArrangementView` included, so the one transaction that swapped the
+    // capsule for the console also swept up the arrangement resizing its two
+    // halves. That is what the flicker was: not a fade of the chrome, but a
+    // quarter second of both halves sliding, begun from the single stale frame
+    // where the window is already folded and the chrome in it is not.
+    //
+    // Scoped here it cannot reach the arrangement or the map -- both are
+    // outside this view -- so the only structural change left for it to drive
+    // is the capsule-for-console swap, and both of those carry
+    // `.transition(.opacity)`. A crossfade in place has no geometry to get
+    // wrong.
+    .animation(.snappy(duration: 0.25), value: hasBase)
   }
 
   /// The map and the chrome, placed.
