@@ -86,7 +86,7 @@ struct SettingsSheetView: View {
       .navigationBarTitleDisplayMode(.inline)
       #endif
       .toolbar {
-        ToolbarItemGroup(placement: .confirmationAction) {
+        ToolbarItemGroup(placement: .sheetConfirmation) {
           // The label carries an icon only where the system wants a bar on a
           // side -- see `SheetActionLabel`. On a phone this is still the word.
           Button { dismiss() } label: { SheetActionLabel(title: "Done", symbol: "checkmark") }

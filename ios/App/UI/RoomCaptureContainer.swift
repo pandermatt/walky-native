@@ -50,7 +50,7 @@ struct RoomCaptureContainer: View {
           }
           .disabled(finishing)
         }
-        ToolbarItem(placement: .confirmationAction) {
+        ToolbarItem(placement: .sheetConfirmation) {
           Button { finishing = true } label: { SheetActionLabel(title: "Done", symbol: "checkmark") }
             .disabled(finishing)
         }

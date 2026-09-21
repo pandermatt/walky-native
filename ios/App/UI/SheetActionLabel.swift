@@ -69,3 +69,39 @@ struct SheetActionLabel: View {
     }
   #endif
 }
+
+extension ToolbarItemPlacement {
+  /// Where a sheet's confirming action goes -- its Done.
+  ///
+  /// `.confirmationAction` is the semantically right answer and stays the
+  /// answer everywhere the system draws a bar across the top. Where it draws
+  /// one down the side, Apple asks for something more specific:
+  ///
+  ///   "Reserve the top for primary navigation controls, like Back or Close,
+  ///    followed by prominent actions, such as Done. ... Use
+  ///    `topBarPinnedTrailing` placement in SwiftUI for prominent navigation
+  ///    items such as a Done button."
+  ///
+  /// Pinned is the word that matters: a vertical bar overflows into a menu when
+  /// it runs short of room, and Done is the item that must never be the one
+  /// that went.
+  ///
+  /// This is not gated to the Duo, where the rest of the vertical-bar work in
+  /// this file is, because the two placements are both the trailing end of the
+  /// same bar and pinning only decides what survives overflow -- which a phone
+  /// with one button in its bar never reaches. Said plainly: that is reasoning,
+  /// not a screenshot. The sheet cannot be opened from the simulator without a
+  /// hardware keyboard, so a horizontal Done under this placement has not been
+  /// looked at. If it ever reads differently from `.confirmationAction`, the
+  /// fix is to gate this the way `SheetActionLabel` gates its icon.
+  ///
+  /// iOS only because the symbol is -- `topBarPinnedTrailing` is unavailable on
+  /// macOS, where a sheet's buttons sit in a row at its foot and there is no
+  /// top bar to pin anything to.
+  static var sheetConfirmation: ToolbarItemPlacement {
+    #if os(iOS)
+      if #available(iOS 27.0, *) { return .topBarPinnedTrailing }
+    #endif
+    return .confirmationAction
+  }
+}
