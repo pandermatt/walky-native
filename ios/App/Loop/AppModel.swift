@@ -346,6 +346,39 @@ final class AppModel {
   /// `navReady` is the same call `MapImporter` awaits at its `.routing` step,
   /// so an import that reaches Play has usually paid this already and this
   /// returns at once.
+  /// Advances a stopped simulation by hand.
+  ///
+  /// Through the model rather than straight to `world.stepOnce()`, and the
+  /// reason is the same one `prepareThenRun` exists for: `stepOnce` begins with
+  /// `ensureNav()`, which on a map whose graph has never been built takes the
+  /// *synchronous* path and freezes the app for as long as the build takes --
+  /// seconds, on an imported street plan. A Step button that hangs the first
+  /// time it is pressed is worse than no Step button.
+  ///
+  /// The ticks are run in a burst rather than spread over frames because the
+  /// count is small: six ticks is a tenth of a second, and even at four
+  /// thousand agents that is well under a frame's worth of work at the
+  /// measured cost per tick. A burst of half a second would not be.
+  func step(_ ticks: Int) {
+    guard !world.running, !routing.preparing else { return }
+    guard world.navNeedsFirstBuild else { return advance(ticks) }
+    routing.preparing = true
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.world.navReady()
+      self.routing.preparing = false
+      self.advance(ticks)
+    }
+  }
+
+  private func advance(_ ticks: Int) {
+    for _ in 0..<ticks { world.stepOnce() }
+    // `stepOnce` moves the model and asks for nothing; with the loop stopped no
+    // frame is otherwise coming, and `tick` is also what mirrors the crowd's
+    // new size onto `crowd.count`.
+    needsFrame()
+  }
+
   private func prepareThenRun() {
     routing.preparing = true
     Task { @MainActor [weak self] in

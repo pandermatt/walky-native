@@ -219,6 +219,12 @@ extension View {
       .onChange(of: settings.pedestrianRadius) { _, _ in onChange() }
       .onChange(of: settings.personalSpace) { _, _ in onChange() }
       .onChange(of: settings.showConvexHull) { _, _ in onChange() }
+      // Both read by `MapRenderer` and both missing here until now. A sheet
+      // hid it: dismissing one sets `isCovered` back to false, which asks for
+      // a frame anyway. A Mac's Settings is a window and covers nothing, so
+      // there the map simply did not change until the next edit.
+      .onChange(of: settings.showLineToTarget) { _, _ in onChange() }
+      .onChange(of: settings.showBasemap) { _, _ in onChange() }
       .onChange(of: settings.showPersonalSpace) { _, _ in onChange() }
       .onChange(of: settings.showDebug) { _, _ in onChange() }
       .onChange(of: settings.groundId) { _, _ in onChange() }
