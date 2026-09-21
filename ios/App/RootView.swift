@@ -252,7 +252,24 @@ struct RootView: View {
     // division is a crease that is not currently dividing anything -- a phone
     // lying flat -- and counting one would put the settings in a base that is
     // not there.
-    return !proxy.reservedRegions(kind: .division).isEmpty
+    //
+    // And the region has to actually *divide this window*, not merely exist.
+    // In Split View the app gets one page and the crease runs along its edge:
+    // the region is there and active, but there is nothing of ours on the far
+    // side of it. Answering true then was the bug where Walky beside another
+    // app showed its console and no map at all -- the arrangement had nothing
+    // to split, so in `.overlay` style it drew the console *over* the map, and
+    // the console's material hid it completely.
+    //
+    // Dividing means content on both sides: the band has to fall strictly
+    // inside the bounds on one axis or the other.
+    let size = proxy.size
+    return proxy.reservedRegions(kind: .division).contains { region in
+      let f = region.frame
+      let splitsVertically = f.minY > 0 && f.maxY < size.height
+      let splitsHorizontally = f.minX > 0 && f.maxX < size.width
+      return splitsVertically || splitsHorizontally
+    }
   }
 
   var body: some View {
