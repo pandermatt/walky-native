@@ -436,11 +436,11 @@ private struct ConsoleReadout: View {
   /// The one-line version, for the base of a folded phone.
   private var line: some View {
     HStack {
-      stat(crowd.count.formatted(), "walkers")
+      stat(crowd.count.formatted(), "walkies")
+      Spacer()
+      stat(world.metrics.totalArrived.formatted(), "arrived")
       Spacer()
       stat(model.fps.formatted(), "fps")
-      Spacer()
-      stat(world.simTicks.formatted(), "ticks")
     }
     .font(.caption.monospacedDigit())
     .padding(.horizontal, 6)
@@ -465,7 +465,11 @@ private struct ConsoleReadout: View {
         Spacer()
       }
       .padding(.bottom, 2)
-      row(crowd.count.formatted(), "walkers")
+      row(crowd.count.formatted(), "walkies")
+      // The count above is who is still going: a spawned walky is taken out of
+      // the crowd the moment it arrives, so without this the ones that got
+      // where they were going simply vanish from the figures.
+      row(world.metrics.totalArrived.formatted(), "arrived")
       row(elapsed, "elapsed")
       Divider().opacity(0.35)
       row(m.meanSpeedMps.formatted(.number.precision(.fractionLength(2))), "m/s mean")

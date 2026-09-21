@@ -32,6 +32,26 @@ import WalkyCore
 /// honest in the code about which way it went.
 @available(iOS 27.1, *)
 struct WalkyToolbar: ToolbarContent {
+  /// Read as *values*, not off the observable, and that is load-bearing.
+  ///
+  /// `ToolbarContent` is not a `View`. Its body is not an observation-tracked
+  /// scope, so reading `state.selected` in here registers nothing and the bar
+  /// is never told the armed tool changed: the tap fires, the model updates,
+  /// and the glass keeps drawing the old answer. Taking them as values makes
+  /// `RootView.body` the thing that reads them -- which is tracked -- so a new
+  /// value arrives here as a new `WalkyToolbar`.
+  ///
+  /// This is the one thing the comment at the top of `RootView` forbids, done
+  /// on purpose and only for these two. What that rule is about is frequency:
+  /// `crowd.count` moves on every brush point, sixty times a second, and
+  /// reading it up there rebuilt the map under a finger. `selected` moves when
+  /// somebody picks a tool and `running` when they press play -- a handful of
+  /// times a session, each of them a deliberate act that is already repainting
+  /// the map anyway.
+  let selected: ToolId?
+  let running: Bool
+  /// Still the object, because `ToolbarMenuItems` *is* a `View` and tracks its
+  /// own reads -- `canUndo` and `hasMeasurement` are live in there.
   let state: ToolbarState
   let tint: Accent
   let onTool: (ToolId) -> Void
@@ -44,8 +64,8 @@ struct WalkyToolbar: ToolbarContent {
       Button {
         onAction(.start)
       } label: {
-        Label(state.running ? "Pause" : "Start",
-              systemImage: state.running ? "pause.fill" : "play.fill")
+        Label(running ? "Pause" : "Start",
+              systemImage: running ? "pause.fill" : "play.fill")
       }
     }
     .visibilityPriority(.high)
@@ -101,19 +121,26 @@ struct WalkyToolbar: ToolbarContent {
 
   /// One tool.
   ///
-  /// Armed is a tint plus the filled variant of the same symbol. Two signals
-  /// rather than one, because a tint alone is a colour and this app lets you
-  /// choose the accent -- including ones that read quietly against glass.
+  /// A `Toggle`, not a `Button`, and that is the whole of how armed reads.
+  ///
+  /// It was a `Button` tinted with the accent, which worked while the seven sat
+  /// in one `ToolbarItemGroup` and stopped working when they became individual
+  /// items so they could carry their own priorities -- the system restyles a
+  /// bar button and the tint did not survive. Rather than hunt for a tint that
+  /// sticks, say the true thing: a tool is not an action you fire, it is a mode
+  /// that is on or off. A `Toggle` is that, the system draws its own selected
+  /// state for it, and VoiceOver gets the right trait without being told.
+  ///
+  /// The binding is one-way on purpose. `isOn` is read from the model, and
+  /// setting it calls `toggleTool`, which decides what happens -- tapping the
+  /// armed tool disarms it, and the model owns that rule. Writing the new value
+  /// back here would be a second place that decided it.
   private func toolButton(_ id: ToolId) -> some View {
     let command = Command.of(id)
-    let armed = state.selected == id
-    return Button {
-      onTool(id)
-    } label: {
+    let armed = selected == id
+    return Toggle(isOn: Binding(get: { armed }, set: { _ in onTool(id) })) {
       Label(command?.title ?? "", systemImage: command?.symbol ?? "questionmark")
-        .symbolVariant(armed ? .fill : .none)
     }
-    .tint(armed ? MapRenderer.color(tint.color) : nil)
-    .accessibilityAddTraits(armed ? [.isSelected] : [])
+    .toggleStyle(.button)
   }
 }

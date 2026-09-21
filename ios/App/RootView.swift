@@ -256,6 +256,23 @@ struct RootView: View {
   }
 
   var body: some View {
+    // Read *here*, not inside the `.toolbar` closure below.
+    //
+    // `@ToolbarContentBuilder` is not a tracked scope, exactly as a `Canvas`
+    // renderer closure is not -- see the same lesson written at the top of
+    // `MapCanvas`. Reading `toolbar.selected` in there registers no observation
+    // at all, so the bar is never told the armed tool changed: the tap fires,
+    // the model updates, and the glass keeps drawing the old answer. Reading it
+    // in this body registers it, so a new tool arrives as a new bar.
+    //
+    // This is the one thing the note at the top of this file forbids, done for
+    // two properties on purpose. That rule is about *frequency*: `crowd.count`
+    // moves on every brush point, sixty times a second, and reading it here
+    // rebuilt the map under a finger. These two move when somebody picks a tool
+    // or presses play -- a handful of times a session, each already repainting
+    // the map anyway.
+    let armedTool = model.toolbar.selected
+    let isRunning = model.toolbar.running
     // Unconditionally, and that is the point.
     //
     // The system will only stand a bar up on a side for items a navigation
@@ -275,7 +292,9 @@ struct RootView: View {
         // empty beside a console that had duplicated it. The tools come out of
         // the console instead; see `showsTools` below.
         .toolbar { if barEdge != nil, #available(iOS 27.1, *) {
-          WalkyToolbar(state: model.toolbar,
+          WalkyToolbar(selected: armedTool,
+                       running: isRunning,
+                       state: model.toolbar,
                        tint: model.world.settings.accent,
                        onTool: { model.toggleTool($0) },
                        onAction: { model.act($0) })
