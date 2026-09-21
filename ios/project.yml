@@ -397,6 +397,10 @@ targets:
           - "WalkyApp.swift"
           - "RootView.swift"
           - "Input/TouchCanvas.swift"
+          # The system-drawn bar, for the one device that stands bars on a side.
+          # A Mac has no such pose, and `visibilityPriority` is macOS 26.1 where
+          # this target's floor is 26.0.
+          - "UI/WalkyToolbar.swift"
           # The base of a folded phone. A Mac window has no hinge, and
           # `MacRootView` never builds one.
           - "UI/TabletopConsole.swift"

@@ -53,6 +53,15 @@ public final class Metrics {
   private var lastMaxDensity: Double = 0
   private var ticks = 0
 
+  /// How many have reached a goal since the run began.
+  ///
+  /// A running total, where `throughputPerSecond` is a rate over the last five
+  /// seconds. The rate answers "how is it flowing right now"; this answers "how
+  /// many got there", which the windowed figure cannot -- and which nothing
+  /// else can reconstruct either, because a spawned walky is removed from
+  /// `Agents` the moment it arrives.
+  public private(set) var totalArrived = 0
+
   public init() {}
 
   /// Forgets the run, for a Reset or a cleared map.
@@ -64,6 +73,7 @@ public final class Metrics {
     lastMeanDensity = 0
     lastMaxDensity = 0
     ticks = 0
+    totalArrived = 0
   }
 
   /// Reads one tick off the crowd. Call straight after `Agents.step`, while
@@ -96,6 +106,10 @@ public final class Metrics {
     }
 
     arrivalsRing[at] = Double(agents.justArrived.count)
+    // Counted here for the same reason the ring is: this runs straight after
+    // `Agents.step`, while `justArrived` still holds the tick's arrivals and
+    // before `removeArrivedSpawned` takes them out of the crowd.
+    totalArrived += agents.justArrived.count
     movedRing[at] = moved
     walkersRing[at] = walkers
     at = (at + 1) % THROUGHPUT_WINDOW_TICKS

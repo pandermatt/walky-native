@@ -37,6 +37,15 @@ struct TabletopConsole: View {
   let tint: Accent
   let onTool: (ToolId) -> Void
   let onAction: (ToolbarAction) -> Void
+  /// Whether to carry the tools, and the `…` that ends them.
+  ///
+  /// False when the system has taken the bar over -- on the Duo's outer display
+  /// and in landscape -- because then the tools, and an overflow menu holding
+  /// everything else, are already standing up the trailing edge. What is left
+  /// here is what that bar does not have: the transport, the speed, the view
+  /// switches and the readout. Which is the console's actual job; the tool row
+  /// was only ever insurance.
+  var showsTools = true
 
   /// The namespace the armed pill travels in, as in the bar.
   @Namespace private var glass
@@ -57,26 +66,43 @@ struct TabletopConsole: View {
     // under your hands -- the laptop pose these tiles were drawn for. A
     // vertical one leaves a tall column beside the map, which is the same
     // controls in a different shape, not a different set of controls.
+    // Which way the fold cut, and so which of two surfaces this is.
+    //
+    // A horizontal crease leaves a wide, short base under your hands: a remote,
+    // and Play is the thing you reach for. A vertical one leaves a tall column
+    // beside the map, held like a book -- and a page is something you *read*,
+    // so it opens with what the crowd is doing and puts the controls under it.
+    // Same controls either way; different thing to look at first.
     let column = size.height > size.width
     VStack(spacing: 10) {
-      // The only part that is laid out twice. Everything below adapts by
-      // itself, from the width it is handed.
       if column {
-        play
+        ConsoleReadout(crowd: crowd, model: model, world: world, detailed: true)
+        // Capped, where in the base they are free to grow.
+        //
+        // Both tiles ask for `maxHeight: .infinity` so that a short base gives
+        // them whatever is going; a tall column gives them far too much, and a
+        // Play tile a quarter of a page high reads as a mistake rather than as
+        // emphasis. Constraining the *proposal* is enough here -- it is only
+        // making a tile grow that has to happen inside its background.
         HStack(spacing: 10) {
+          play
           step.frame(width: 104)
-          ConsoleSpeed(settings: settings, world: world, fillsHeight: true)
         }
+        .frame(height: 96)
+        ConsoleSpeed(settings: settings, world: world)
+        toggles(perRow: perRow(size.width, tile: 92, spacing: 6, of: Self.viewToggles.count))
       } else {
         HStack(spacing: 10) {
           play
           step.frame(width: 112)
         }
         ConsoleSpeed(settings: settings, world: world)
+        toggles(perRow: perRow(size.width, tile: 92, spacing: 6, of: Self.viewToggles.count))
+        ConsoleReadout(crowd: crowd, model: model, world: world, detailed: false)
       }
-      toggles(perRow: perRow(size.width, tile: 92, spacing: 6, of: Self.viewToggles.count))
-      ConsoleReadout(crowd: crowd, model: model, world: world)
-      toolRow(perRow: perRow(size.width, tile: 72, spacing: 4, of: Self.toolCells.count))
+      if showsTools {
+        toolRow(perRow: perRow(size.width, tile: 72, spacing: 4, of: Self.toolCells.count))
+      }
     }
   }
 
@@ -121,6 +147,12 @@ struct TabletopConsole: View {
     let title: String
     let icon: String
     let keyPath: ReferenceWritableKeyPath<WalkyCore.Settings, Bool>
+    /// Whether the world has anything for this switch to show.
+    ///
+    /// Only Basemap has one: `MapRenderer` draws it solely when there is a
+    /// `geoAnchor`, so on a hand-drawn map the switch is a light with no bulb
+    /// behind it. Dimming it says that, where letting it toggle said nothing.
+    var isLive: (WalkyWorld) -> Bool = { _ in true }
     var id: String { title }
   }
 
@@ -130,7 +162,8 @@ struct TabletopConsole: View {
           keyPath: \.showLineToTarget),
     .init(title: "Space", icon: "circle.dashed", keyPath: \.showPersonalSpace),
     .init(title: "Debug", icon: "speedometer", keyPath: \.showDebug),
-    .init(title: "Map", icon: "map", keyPath: \.showBasemap),
+    .init(title: "Map", icon: "map", keyPath: \.showBasemap,
+          isLive: { $0.geoAnchor != nil }),
   ]
 
   /// The switches, in rows that fill.
@@ -145,7 +178,8 @@ struct TabletopConsole: View {
           ForEach(row) { toggle in
             ConsoleToggleTile(settings: settings, world: world, tint: tint,
                               title: toggle.title, icon: toggle.icon,
-                              keyPath: toggle.keyPath)
+                              keyPath: toggle.keyPath,
+                              isLive: toggle.isLive(world))
               .frame(maxWidth: .infinity)
           }
         }
@@ -354,9 +388,11 @@ private struct ConsoleToggleTile: View {
   let title: String
   let icon: String
   let keyPath: ReferenceWritableKeyPath<WalkyCore.Settings, Bool>
+  /// False when nothing in the world answers to this switch. See `ViewToggle`.
+  var isLive = true
 
   var body: some View {
-    let on = settings[keyPath: keyPath]
+    let on = settings[keyPath: keyPath] && isLive
     Button {
       settings[keyPath: keyPath].toggle()
       // `repaintingTheMap` covers three of these five and misses
@@ -379,6 +415,8 @@ private struct ConsoleToggleTile: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .disabled(!isLive)
+    .opacity(isLive ? 1 : 0.4)
     .accessibilityLabel(title)
     .accessibilityAddTraits(on ? [.isSelected] : [])
     .animation(.snappy(duration: 0.2), value: on)
@@ -397,20 +435,78 @@ private struct ConsoleReadout: View {
   let crowd: Crowd
   let model: AppModel
   let world: WalkyWorld
+  /// A page of figures rather than a line of them.
+  let detailed: Bool
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 1)) { _ in
-      HStack {
-        stat(crowd.count.formatted(), "walkers")
-        Spacer()
-        stat(model.fps.formatted(), "fps")
-        Spacer()
-        stat(world.simTicks.formatted(), "ticks")
-      }
-      .font(.caption.monospacedDigit())
-      .padding(.horizontal, 6)
+      if detailed { page } else { line }
     }
     .accessibilityElement(children: .combine)
+  }
+
+  /// The one-line version, for the base of a folded phone.
+  private var line: some View {
+    HStack {
+      stat(world.agents.walkingCount.formatted(), "walkies")
+      Spacer()
+      stat(world.metrics.totalArrived.formatted(), "arrived")
+      Spacer()
+      stat(model.fps.formatted(), "fps")
+    }
+    .font(.caption.monospacedDigit())
+    .padding(.horizontal, 6)
+  }
+
+  /// The page version.
+  ///
+  /// `Metrics.readout()` is the same four figures the debug overlay draws over
+  /// the map for developers -- mean speed, mean and peak density, arrivals a
+  /// second. Here they are the point rather than a diagnostic: this is the half
+  /// you are looking at while the other half walks.
+  ///
+  /// Three sums over 300-element rings, once a second. Free.
+  private var page: some View {
+    let m = world.metrics.readout()
+    return VStack(spacing: 4) {
+      // Named, because on this half the figures are the content rather than an
+      // overlay on something else -- and a column of bare numbers with no
+      // heading reads as debug output.
+      HStack {
+        Text("Statistics").font(.caption).foregroundStyle(.secondary)
+        Spacer()
+      }
+      .padding(.bottom, 2)
+      row(world.agents.walkingCount.formatted(), "walkies")
+      // The count above is who is still going: a spawned walky is taken out of
+      // the crowd the moment it arrives, so without this the ones that got
+      // where they were going simply vanish from the figures.
+      row(world.metrics.totalArrived.formatted(), "arrived")
+      row(elapsed, "elapsed")
+      Divider().opacity(0.35)
+      row(m.meanSpeedMps.formatted(.number.precision(.fractionLength(2))), "m/s mean")
+      row(m.meanDensity.formatted(.number.precision(.fractionLength(2))), "per m² mean")
+      row(m.maxDensity.formatted(.number.precision(.fractionLength(2))), "per m² peak")
+      row(m.throughputPerSecond.formatted(.number.precision(.fractionLength(1))), "arriving a second")
+    }
+    .font(.caption.monospacedDigit())
+    .padding(.horizontal, 12).padding(.vertical, 10)
+    .background(.quaternary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+  }
+
+  /// Simulated time, which is ticks and not the wall clock -- a paused map does
+  /// not age, and a stepped one ages by exactly what you stepped it.
+  private var elapsed: String {
+    let seconds = Int(Double(world.simTicks) / TICKS_PER_SECOND)
+    return String(format: "%d:%02d", seconds / 60, seconds % 60)
+  }
+
+  private func row(_ value: String, _ unit: String) -> some View {
+    HStack {
+      Text(value)
+      Spacer()
+      Text(unit).foregroundStyle(.secondary)
+    }
   }
 
   private func stat(_ value: String, _ unit: String) -> some View {
