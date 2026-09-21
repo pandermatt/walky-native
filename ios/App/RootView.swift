@@ -365,10 +365,28 @@ struct RootView: View {
           BarEdgeReader { barEdge = $0 }
         }
       }
+    // Animate what the model decides; never what the geometry reports.
+    //
+    // These two are the model's: a route starts preparing, or somebody hides
+    // the chrome, and the change is known at the moment it is made.
     .animation(.snappy(duration: 0.25), value: model.routing.preparing)
     .animation(.snappy(duration: 0.25), value: model.chrome.hidden)
-    .animation(.snappy(duration: 0.25), value: divided)
-    .animation(.snappy(duration: 0.25), value: barEdge)
+    // `divided` and `barEdge` used to be animated here too, and that is what
+    // made folding the phone flicker.
+    //
+    // Both are read out of the geometry and land in `@State`, which costs a
+    // pass: `ArrangementView` is the system's own container and splits the
+    // window in the layout pass the division arrives in, while `divided`
+    // cannot be true until the pass after. So for one frame the screen is
+    // already two halves with the *unfolded* chrome laid into one of them.
+    //
+    // A frame is eight milliseconds and nobody would catch it. What made it
+    // visible was animating it: a `.snappy(0.25)` keyed on a value that is
+    // always one pass stale does not smooth the correction, it plays it --
+    // a quarter second of chrome sliding in from where it should never have
+    // been. Dropping the animation does not fix the staleness, it stops
+    // advertising it, and the real fix is to consume `creased(proxy)` inside
+    // the layout pass rather than round-tripping it through state.
     .background(MapRenderer.color(model.world.settings.ground.background))
     .preferredColorScheme(windowScheme)
     .statusBarHidden(model.chrome.hidden)
