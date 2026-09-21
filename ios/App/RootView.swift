@@ -286,19 +286,35 @@ struct RootView: View {
     // phone, an iPad or in any flat pose nothing about the layout moves.
     NavigationStack {
       layout
-        // Wherever the system asks for it, folded or not. It used to be
-        // suppressed when the console was up, to stop the seven tools appearing
-        // twice -- but that left the strip the system had reserved sitting
-        // empty beside a console that had duplicated it. The tools come out of
-        // the console instead; see `showsTools` below.
-        .toolbar { if barEdge != nil, #available(iOS 27.1, *) {
-          WalkyToolbar(selected: armedTool,
-                       running: isRunning,
-                       state: model.toolbar,
-                       tint: model.world.settings.accent,
-                       onTool: { model.toggleTool($0) },
-                       onAction: { model.act($0) })
-        } }
+        // The bar is hung off this, not off `layout`, and the `id` is the whole
+        // reason.
+        //
+        // A vertical bar is drawn once and then left alone: handing the system
+        // new toolbar content does not redraw it. Arming a tool by tapping its
+        // own item looks right because the control updates itself, but arming
+        // it any other way -- a digit on a keyboard, hiding the chrome, which
+        // puts the tool down -- left the bar lighting a tool that was no longer
+        // in hand. Rotating the phone fixed it, because that rebuilt the bar.
+        //
+        // So: rebuild it on purpose. Changing the `id` makes this subtree a new
+        // subtree, the toolbar is registered afresh, and the lit tool is the
+        // armed one again. It is an empty, untouchable overlay, so the thing
+        // being thrown away and rebuilt is nothing at all -- and crucially the
+        // map is not inside it. Putting the `id` on `layout` would rebuild
+        // `MapCanvas` and lose its `RenderCache` every time a tool changed.
+        .overlay {
+          Color.clear
+            .allowsHitTesting(false)
+            .toolbar { if barEdge != nil, #available(iOS 27.1, *) {
+              WalkyToolbar(selected: armedTool,
+                           running: isRunning,
+                           state: model.toolbar,
+                           tint: model.world.settings.accent,
+                           onTool: { model.toggleTool($0) },
+                           onAction: { model.act($0) })
+            } }
+            .id(ToolbarIdentity(tool: armedTool, running: isRunning, edge: barEdge))
+        }
         // The iOS 16 spellings, not the 18 ones: this target's floor is 17.
         .toolbar(barEdge == nil ? .hidden : .automatic, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
@@ -585,4 +601,15 @@ private struct BarEdgeReader: View {
   var body: some View {
     Color.clear.onChange(of: edge, initial: true) { _, now in onChange(now) }
   }
+}
+
+/// What the system-drawn bar is showing.
+///
+/// Its own type so the `id` reads as a fact rather than as a tuple: when any of
+/// these three changes, the bar is stale and has to be built again. See the
+/// overlay in `RootView` for why that is necessary at all.
+private struct ToolbarIdentity: Hashable {
+  let tool: ToolId?
+  let running: Bool
+  let edge: HorizontalEdge?
 }
