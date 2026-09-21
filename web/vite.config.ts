@@ -14,7 +14,13 @@ export default defineConfig({
   // WALKY_WALLPAPER_DIR points tools/wallpapers.html somewhere else --
   // the images are committed to whichever site serves them, which is not
   // this one. See build/wallpaperWriter.ts.
-  plugins: [pwa(), ogWriter(), wallpaperWriter(process.env.WALKY_WALLPAPER_DIR)],
+  plugins: [
+    pwa(),
+    ogWriter(),
+    // The Duo announcement card, drawn by tools/duoBanner.html.
+    ogWriter('public/images/duo-banner.png', '/__walky/duo-banner.png'),
+    wallpaperWriter(process.env.WALKY_WALLPAPER_DIR),
+  ],
   define: { __WALKY_APP_VERSION__: JSON.stringify(version) },
   test: {
     // Git worktrees live under .claude/worktrees and contain a full copy of this
