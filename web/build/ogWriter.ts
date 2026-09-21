@@ -24,12 +24,20 @@ const ENDPOINT = '/__walky/og.png';
 /** The eight bytes every PNG starts with. */
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-export function ogWriter(outFile = 'public/images/og.png'): Plugin {
+/**
+ * The path and the destination travel together, so a second card is a second
+ * call rather than a second copy of this file. The name has to differ too --
+ * Vite keys plugins by it, and two instances sharing one name is one instance.
+ */
+export function ogWriter(
+  outFile = 'public/images/og.png',
+  endpoint = ENDPOINT,
+): Plugin {
   return {
-    name: 'walky-og-writer',
+    name: `walky-og-writer:${outFile}`,
     apply: 'serve',
     configureServer(server) {
-      server.middlewares.use(ENDPOINT, (req, res, next) => {
+      server.middlewares.use(endpoint, (req, res, next) => {
         if (req.method !== 'POST') {
           next();
           return;
