@@ -9,17 +9,21 @@ export type ToolId =
  * What the eraser would take away at a point.
  *
  * Whole objects only: one drawn shape, one border frame, one pedestrian, one
- * label, one generator. There is no half a wall -- a shape is what one draw action made, and
+ * label. There is no half a wall -- a shape is what one draw action made, and
  * rubbing a corner off one would mean re-cutting geometry the navigation graph,
  * the group outlines and the undo snapshots are all built from. A label is the
  * same bargain in miniature: a word is what one act of typing made.
+ *
+ * A door is not its own kind here: it is a wall's own payload rather than a
+ * shape of its own, so erasing the wall takes the door with it, the way
+ * erasing a goal wall already takes its goal. Marking and unmarking one is
+ * the generator tool's job, not the eraser's.
  */
 export interface EraseTarget {
-  kind: 'wall' | 'pedestrian' | 'label' | 'generator';
+  kind: 'wall' | 'pedestrian' | 'label';
   /**
-   * The wall's, label's or generator's id, or the pedestrian's index --
-   * whichever `kind` says. A pedestrian has no id of its own; the rest are
-   * stable.
+   * The wall's or label's id, or the pedestrian's index -- whichever `kind`
+   * says. A pedestrian has no id of its own; the rest are stable.
    */
   id: number;
   /** Outlines of what would go, for the preview. A border frame is four bars. */

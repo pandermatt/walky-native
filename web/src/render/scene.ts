@@ -50,16 +50,17 @@ export interface Ray {
 }
 
 /**
- * A generator as the scene draws it: the rounded block it occupies, and whether
- * it is the one the pointer has hold of.
- *
- * The polygon comes ready-made rather than being derived here from a centre and
- * a radius, so that what is drawn, what a click hits and what the tool previewed
- * are all the same call to generatorRoundedSquare.
+ * A door as the scene draws it: marked on the wall it is, not on a shape of
+ * its own. `polygons` are that wall's own polygons, unchanged -- the glow
+ * paints exactly the area the wall layer already fills, nothing wider and
+ * nothing narrower. `outline` is a ring a few units clear of the wall's hull,
+ * so the marker reads as its own thing rather than merging with the wall's
+ * own edge.
  */
 export interface GeneratorView {
   id: number;
-  polygon: Point[];
+  polygons: Point[][];
+  outline: Point[];
   color: RGB;
   selected: boolean;
 }
@@ -159,7 +160,6 @@ export class Scene {
     } = state;
     const fadedWall = erasing?.kind === 'wall' ? erasing.id : -1;
     const fadedAgent = erasing?.kind === 'pedestrian' ? erasing.id : -1;
-    const fadedGenerator = erasing?.kind === 'generator' ? erasing.id : -1;
 
     return [
       // Walls are flat 2D fills -- no shadow copy, no extrusion. A merged wall
@@ -184,31 +184,30 @@ export class Scene {
         },
       }),
 
-      // Over the walls and under the crowd, which is where it stands: a
-      // generator is a thing on the floor that people come out of, and a
-      // pedestrian half-out of one should be in front of it.
+      // Over the wall, marking it rather than standing beside it -- a door is a
+      // wall with people coming out of it, not a shape of its own.
       //
-      // Two layers because it is two marks. The fill is the block in the colour
-      // of the goal it is pinned to -- white, and so plainly unwired, until it
-      // is. The outline is the same white ring the pedestrians wear, and turns
-      // the same thick yellow when it is selected, because being picked in order
-      // to be sent somewhere is exactly what it shares with them.
-      //
-      // Both are drawn on the rounded shape rather than the bare footprint. On a
-      // map whose every obstacle is a hard rectangle, taken corners are the one
-      // difference readable at any zoom without a legend: it looks like an icon
-      // sitting on the floor, which is what it is.
-      new SolidPolygonLayer<GeneratorView>({
+      // Two layers because it is two marks. The fill is a translucent glow the
+      // colour of the goal the door is pinned to -- white, and so plainly
+      // unwired, until it is -- painted on exactly the wall's own polygons, so
+      // it reads as the wall lit up rather than as something drawn over it. The
+      // outline is a ring clear of the wall's edge, the same white the
+      // pedestrians wear and the same thick yellow when it is selected, because
+      // being picked in order to be sent somewhere is exactly what it shares
+      // with them.
+      new SolidPolygonLayer<WallPiece>({
         id: 'generators',
-        data: generators,
-        getPolygon: (g) => g.polygon,
-        getFillColor: (g) => withAlpha(
-          g.color, g.id === fadedGenerator ? ERASING_ALPHA : GENERATOR_ALPHA,
+        data: generators.flatMap((g) => (
+          g.polygons.map((polygon) => ({ wallId: g.id, polygon, color: g.color }))
+        )),
+        getPolygon: (piece) => piece.polygon,
+        getFillColor: (piece) => withAlpha(
+          piece.color, piece.wallId === fadedWall ? ERASING_ALPHA : GENERATOR_ALPHA,
         ),
         filled: true,
         updateTriggers: {
           getPolygon: worldRevision,
-          getFillColor: `${worldRevision}:${fadedGenerator}`,
+          getFillColor: `${worldRevision}:${fadedWall}`,
         },
       }),
 
@@ -217,7 +216,7 @@ export class Scene {
         data: generators,
         // Closed by hand: a path is a line, and the ring wants its last point
         // joined back to its first.
-        getPath: (g) => [...g.polygon, g.polygon[0]],
+        getPath: (g) => [...g.outline, g.outline[0]],
         getColor: (g) => (g.selected ? YELLOW : WHITE) as unknown as [number, number, number],
         widthUnits: 'pixels',
         getWidth: (g) => (g.selected ? 3 : 1),
