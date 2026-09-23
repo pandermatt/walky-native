@@ -3,7 +3,7 @@ import { LABEL_MIN_PX, Overlay, type EditingLabel, type RecordFrame, type Screen
 import { Viewport, type Bounds } from './render/viewport';
 import { toCss, BACKGROUND, WHITE, type RGB } from './palette';
 import {
-  DEFAULT_SETTINGS, GENERATOR_CELLS, generatorMouth, generatorRoundedSquare,
+  DEFAULT_SETTINGS, GENERATOR_CELLS, generatorMouth,
   makeGenerator, makeLabel, makeWall, rectanglePolygon, wallContains, wallMiddle,
   type Label, type LabelStyle, type Settings, type Wall, type WallOptions,
 } from './state/model';
@@ -69,6 +69,15 @@ const FRAME_DRAG_THRESHOLD = 6;
  * two-minute video of a postage stamp.
  */
 const MIN_FRAME_PX = 96;
+
+/**
+ * How far clear of a door's own edge its marker ring stands, in world units.
+ *
+ * Just enough that the ring reads as its own mark rather than merging with the
+ * wall's own edge -- a plain outline drawn directly on the wall would be
+ * indistinguishable from the wall simply being there.
+ */
+const DOOR_RING_OUTSET = 6;
 
 /** What the chip says while a frame is being chosen. */
 const FRAMING_HINT = 'Drag to frame the recording  ·  Enter for all  ·  Esc to cancel';
@@ -1362,22 +1371,6 @@ export class App {
   }
 
   /**
-   * The wall whose door's *mouth* -- the block people actually come out of --
-   * is under a point, or null. What the eraser aims at, since that block is the
-   * visible, clickable picture of a door and the wall underneath it is a
-   * separate object the eraser reaches by its own polygon instead.
-   */
-  private pickGeneratorMouth(at: Point): Wall | null {
-    const r = this.settings.pedestrianRadius;
-    for (let i = this.walls.length - 1; i >= 0; i--) {
-      const wall = this.walls[i];
-      if (!wall.generator) continue;
-      if (pointInPolygon(generatorRoundedSquare(generatorMouth(wall, this.walls, r), r), at)) return wall;
-    }
-    return null;
-  }
-
-  /**
    * Everything currently picked out, pedestrians and doors together.
    *
    * One number rather than two because one question is being asked of it: does a
@@ -1450,19 +1443,6 @@ export class App {
         outlines: [ring([this.agents.x[i], this.agents.y[i]], halo)],
       };
     }
-    // Then a door's mouth, which is drawn over the walls and under the crowd,
-    // and so is picked in exactly that order. Erasing it un-marks the door and
-    // leaves the wall standing -- the wall is what a click on it, below, takes.
-    const mouthWall = this.pickGeneratorMouth(at);
-    if (mouthWall) {
-      const r = this.settings.pedestrianRadius;
-      return {
-        kind: 'generator',
-        id: mouthWall.id,
-        outlines: [generatorRoundedSquare(generatorMouth(mouthWall, this.walls, r), r)],
-      };
-    }
-
     const wall = this.pickWall(at);
     // A wall's own polygons: for a border frame that is its four bars, which
     // outlines exactly the frame that is about to go -- door and all, since a
@@ -1492,20 +1472,6 @@ export class App {
     if (i >= 0) {
       if (!sameStroke) this.checkpoint();
       this.agents.removeAt(i);
-      this.touch();
-      return true;
-    }
-
-    const mouthWall = this.pickGeneratorMouth(at);
-    if (mouthWall) {
-      if (!sameStroke) this.checkpoint();
-      // Un-marks the door and leaves the wall standing, exactly as the
-      // generator tool's own toggle does -- a click on the wall itself, below,
-      // is what takes the wall.
-      mouthWall.generator = undefined;
-      // Whatever it had already let out goes on walking. Those are pedestrians
-      // on the map now, with somewhere to be; taking them with the door would be
-      // deleting a crowd nobody pointed at.
       this.touch();
       return true;
     }
@@ -2074,14 +2040,14 @@ export class App {
     return out;
   }
 
-  /** The doors as the scene draws them, at their mouths; see agentViews for the same bargain. */
+  /** The doors as the scene draws them, marked on their own walls; see agentViews for the same bargain. */
   private generatorViews(): GeneratorView[] {
-    const r = this.settings.pedestrianRadius;
     return this.walls.filter((w) => w.generator).map((w) => ({
       // The wall's own id: a wall carries at most one door, so it is as stable
       // and as unique a key for the door's view as it is for the wall's own.
       id: w.id,
-      polygon: generatorRoundedSquare(generatorMouth(w, this.walls, r), r),
+      polygons: w.polygons,
+      outline: expandPolygon(w.hull, DOOR_RING_OUTSET),
       color: w.generator!.color,
       selected: w.selected,
     }));
