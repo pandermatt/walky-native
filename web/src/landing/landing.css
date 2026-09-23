@@ -1085,6 +1085,23 @@ html[data-js] .reveal.is-visible {
   color: rgba(var(--c-text-2), 1);
 }
 
-.footer-links { display: flex; flex-wrap: wrap; gap: var(--space-s); }
-.footer-links a { transition: color var(--transition); }
+.footer-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-s); }
+.footer-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  transition: color var(--transition);
+}
 .footer-links a:hover { color: rgba(var(--c-accent-ink), 1); }
+.footer-links svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* Pascal's site and the policy it hosts are one place, not two footer items,
+   so a rule sets them apart from the project links beside them. */
+.footer-links-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s);
+  padding-left: var(--space-s);
+  border-left: 1px solid rgba(var(--c-divider), 1);
+}
