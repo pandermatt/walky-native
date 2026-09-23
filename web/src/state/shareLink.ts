@@ -4,6 +4,7 @@ import {
   decodeScenarioBody, encodeScenario, encodeScenarioBody,
   readHeader, scenarioHeader,
 } from './codec';
+import { MAX_BODY_BYTES, hasCompression, through } from './compress';
 import type { ScenarioCore } from './scenario';
 
 /**
@@ -35,47 +36,6 @@ export const LINK_SAFE_CHARS = 2000;
  * more, and handing over one that silently fails to open is worse than saying so.
  */
 export const LINK_MAX_CHARS = 32000;
-
-/**
- * What an inflated body is allowed to come to.
- *
- * Deflate is the one step here that can turn a small input into a large output,
- * so the cap the codec applies to counts has to be matched by a cap on the bytes
- * those counts are read from -- otherwise a kilobyte of crafted zeroes becomes
- * hundreds of megabytes before the first count is ever checked.
- */
-const MAX_BODY_BYTES = 1 << 20;
-
-function hasCompression(): boolean {
-  return typeof CompressionStream !== 'undefined' && typeof DecompressionStream !== 'undefined';
-}
-
-async function through(
-  bytes: Uint8Array,
-  stream: TransformStream<BufferSource, Uint8Array>,
-  limit: number,
-): Promise<Uint8Array> {
-  const source = new Blob([bytes as BlobPart]).stream() as unknown as ReadableStream<BufferSource>;
-  const reader = source.pipeThrough(stream).getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.length;
-    // Checked per chunk rather than at the end, so a bomb is abandoned while it
-    // is still small rather than after it has been held in full.
-    if (total > limit) {
-      await reader.cancel();
-      throw new ScenarioLinkError('that link unpacks to more than Walky can hold');
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const chunk of chunks) { out.set(chunk, at); at += chunk.length; }
-  return out;
-}
 
 /**
  * The fragment for a map: `#m=` followed by base64url.

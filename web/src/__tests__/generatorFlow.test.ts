@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { Agents } from '../sim/agents';
 import {
-  DEFAULT_SETTINGS, makeGenerator, generatorContains, generatorSquare,
-  generatorRoundedSquare, GENERATOR_CELLS,
+  DEFAULT_SETTINGS, GENERATOR_CELLS, generatorMouth, generatorRoundedSquare,
+  makeGenerator, makeWall, mouthDirection, rectanglePolygon, wallMiddle,
 } from '../state/model';
 
 /**
@@ -81,50 +81,72 @@ describe('generator pedestrians', () => {
 
 describe('a generator', () => {
   it('starts unpinned, which is what stops it emitting into nowhere', () => {
-    const g = makeGenerator([0, 0], 5);
+    const g = makeGenerator(5);
     expect(g.goal).toBe(-1);
     expect(g.owed).toBe(0);
     expect(g.rate).toBe(5);
   });
 
-  it('takes its footprint from the pedestrian radius, not from a stored size', () => {
-    const g = makeGenerator([100, 100], 4);
-    const r = DEFAULT_SETTINGS.pedestrianRadius;
-    const half = GENERATOR_CELLS * r;
-    expect(generatorSquare(g.at, r)).toEqual([
-      [100 - half, 100 - half], [100 + half, 100 - half],
-      [100 + half, 100 + half], [100 - half, 100 + half],
-    ]);
-    expect(generatorContains(g, [100 + half - 1, 100], r)).toBe(true);
-    expect(generatorContains(g, [100 + half + 1, 100], r)).toBe(false);
-    // Half the radius, half the block: the door is the size of the people.
-    expect(generatorContains(g, [100 + half - 1, 100], r / 2)).toBe(false);
-  });
-
-  it('is drawn as a rounded square, inside the footprint and reaching its edges', () => {
+  it('is drawn as a rounded square, inside its footprint and reaching its edges', () => {
     const r = DEFAULT_SETTINGS.pedestrianRadius;
     const half = GENERATOR_CELLS * r;
     const shape = generatorRoundedSquare([100, 100], r);
 
     const xs = shape.map((p) => p[0]);
     const ys = shape.map((p) => p[1]);
-    // It fills the same box the footprint does -- the corners are taken off, the
-    // sides are not pulled in -- so framing and layout are unchanged by rounding.
+    // It fills the block's own box -- the corners are taken off, the sides are
+    // not pulled in -- so framing and layout are unchanged by rounding.
     expect(Math.min(...xs)).toBeCloseTo(100 - half);
     expect(Math.max(...xs)).toBeCloseTo(100 + half);
     expect(Math.min(...ys)).toBeCloseTo(100 - half);
     expect(Math.max(...ys)).toBeCloseTo(100 + half);
-    // And no point of it lies outside that box.
     for (const [x, y] of shape) {
       expect(Math.abs(x - 100)).toBeLessThanOrEqual(half + 1e-9);
       expect(Math.abs(y - 100)).toBeLessThanOrEqual(half + 1e-9);
     }
-    // The corner itself is gone: the footprint has a point there, the block does
-    // not, and neither does the hit test.
-    expect(generatorSquare([100, 100], r)).toContainEqual([100 + half, 100 + half]);
-    expect(shape).not.toContainEqual([100 + half, 100 + half]);
-    const g = makeGenerator([100, 100], 4);
-    expect(generatorContains(g, [100 + half - 1, 100 + half - 1], r)).toBe(false);
-    expect(generatorContains(g, [100, 100 + half - 1], r)).toBe(true);
+  });
+});
+
+describe('a door\'s mouth', () => {
+  const box = (x: number, y: number, w = 10, h = 10) => makeWall([rectanglePolygon([x, y], [x + w, y + h])]);
+
+  it('is nowhere in particular, and nobody comes out, while it is aimed at nothing', () => {
+    const wall = box(0, 0);
+    wall.generator = makeGenerator(4);
+    expect(mouthDirection(wall, [wall])).toBeNull();
+    expect(generatorMouth(wall, [wall], 13)).toEqual(wallMiddle(wall));
+  });
+
+  it('faces the goal it is pinned to', () => {
+    const wall = box(0, 0);
+    const goal = box(0, 100);
+    wall.generator = makeGenerator(4);
+    wall.generator.goal = goal.id;
+    const dir = mouthDirection(wall, [wall, goal]);
+    expect(dir?.[0]).toBeCloseTo(0);
+    expect(dir?.[1]).toBeCloseTo(1);
+  });
+
+  it('stands clear of the wall by the door block\'s own half-width', () => {
+    const wall = box(0, 0);
+    const goal = box(0, 1000);
+    wall.generator = makeGenerator(4);
+    wall.generator.goal = goal.id;
+    const r = 13;
+    const [mx, my] = generatorMouth(wall, [wall, goal], r);
+    const [wx, wy] = wallMiddle(wall);
+    expect(mx).toBeCloseTo(wx);
+    // Reach out of the wall's own half-height (5) plus the block's own
+    // half-width (GENERATOR_CELLS * r).
+    expect(my).toBeCloseTo(wy + 5 + GENERATOR_CELLS * r);
+  });
+
+  it('is overridden by an explicit facing, whatever the goal says', () => {
+    const wall = box(0, 0);
+    const goal = box(0, 100);
+    wall.generator = makeGenerator(4);
+    wall.generator.goal = goal.id;
+    wall.generator.outFacing = [-1, 0];
+    expect(mouthDirection(wall, [wall, goal])).toEqual([-1, 0]);
   });
 });

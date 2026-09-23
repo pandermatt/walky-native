@@ -1,11 +1,11 @@
-import type { RGB } from '../palette';
+import { WHITE, type RGB } from '../palette';
 import type { Point } from '../sim/geometry';
 import { ZOOM_LEVEL_MAX, ZOOM_LEVEL_MIN } from '../render/viewport';
 import { mpsFromPxPerTick } from '../sim/units';
 import {
   SCENARIO_VERSION, clampSettings,
   type ScenarioCore, type SerializedAgent, type SerializedGenerator,
-  type SerializedLabel, type SerializedWall,
+  type SerializedLabel, type SerializedWall, type SerializedWallGenerator,
 } from './scenario';
 import type { Settings } from './model';
 
@@ -59,8 +59,21 @@ const MAGIC = 0x57;
  *
  * Version 2 dropped the tree block along with trees themselves; version 3
  * dropped the per-wall outlinedAlone bit, since every shape is hulled now.
+ *
+ * Versions 4 and 6 are the iOS port's, ported back: a door moved from a
+ * free-standing point to a payload on the wall it belongs to, and gained an
+ * optional exit facing. Both ride as flags rather than replacing this
+ * constant -- see impliedVersion -- so a map with neither still encodes at
+ * version 3, byte-identical to what this build always wrote. Version 5 is
+ * permanently spent: iOS minted and retired VERSION_DOOR_SIDES/FLAG_DOOR_SIDES
+ * in the same piece of work, before any real map used it, and re-using either
+ * number would read an old payload's bytes as the opposite of what they meant.
  */
 export const CODEC_VERSION = 3;
+const VERSION_WALL_GENERATORS = 4;
+const VERSION_DOOR_FACE = 6;
+/** Every version this build will open. 5 is deliberately not among them. */
+const ACCEPTED_VERSIONS = new Set([CODEC_VERSION, VERSION_WALL_GENERATORS, VERSION_DOOR_FACE]);
 
 /** The body is deflate-raw rather than the bytes written here. Set by shareLink.ts. */
 export const FLAG_DEFLATED = 1;
@@ -101,12 +114,35 @@ export const FLAG_GENERATORS = 4;
  */
 export const FLAG_SPEED_MPS = 8;
 
+/**
+ * The body carries a wall-generators tail after the point generators: which
+ * walls are doors, at what rate, aimed where. Ported from iOS's
+ * FLAG_WALL_GENERATORS -- see impliedVersion for why this is a flag next to a
+ * version bump rather than instead of one.
+ */
+export const FLAG_WALL_GENERATORS = 16;
+/**
+ * Bit 32. Never assign this: it is iOS's retired FLAG_DOOR_SIDES, minted and
+ * burned in the same piece of work before any real map used it. The field it
+ * named now means the opposite of what it did, so reusing the bit would read
+ * an old payload's bytes as a lie rather than refusing them by name.
+ */
+/**
+ * The body carries a door-facing tail after the wall generators: which doors
+ * have been told which side to use, as a unit vector. Ported from iOS's
+ * FLAG_DOOR_FACE.
+ */
+export const FLAG_DOOR_FACE = 64;
+
 /** Every bit that means something. Anything else set is a payload from the future. */
-const KNOWN_FLAGS = FLAG_DEFLATED | FLAG_LABELS | FLAG_GENERATORS | FLAG_SPEED_MPS;
+const KNOWN_FLAGS = FLAG_DEFLATED | FLAG_LABELS | FLAG_GENERATORS | FLAG_SPEED_MPS
+  | FLAG_WALL_GENERATORS | FLAG_DOOR_FACE;
 
 /** Sub-unit precision for the one thing in a map that is not a whole number. */
 const VIEW_QUANTUM = 16;  // at the deepest zoom a 16th of a unit is under 4px
 const ZOOM_QUANTUM = 256; // a pinch lands between the wheel's whole notches
+/** Three decimal places of a unit vector, matching iOS's FACING_QUANTUM. */
+const FACING_QUANTUM = 1000;
 
 /**
  * Ceilings on the payload, checked before anything is allocated.
@@ -316,8 +352,20 @@ const WALL_IS_BORDER = 2;
 
 // ---- header ----------------------------------------------------------------
 
+/**
+ * The version byte a body with these flags implies, matching iOS's
+ * CodecScenario.impliedVersion: 6 if it carries a door facing, else 4 if it
+ * carries a wall generator, else the base version. A map with neither writes
+ * at version 3 and is byte-identical to what this build has always written.
+ */
+function impliedVersion(flags: number): number {
+  if (flags & FLAG_DOOR_FACE) return VERSION_DOOR_FACE;
+  if (flags & FLAG_WALL_GENERATORS) return VERSION_WALL_GENERATORS;
+  return CODEC_VERSION;
+}
+
 export function scenarioHeader(flags: number): Uint8Array {
-  return Uint8Array.from([MAGIC, CODEC_VERSION, flags & 0xff]);
+  return Uint8Array.from([MAGIC, impliedVersion(flags), flags & 0xff]);
 }
 
 /**
@@ -327,7 +375,7 @@ export function scenarioHeader(flags: number): Uint8Array {
 export function readHeader(bytes: Uint8Array): { flags: number; body: Uint8Array } {
   if (bytes.length < 3) throw new ScenarioLinkError(TRUNCATED);
   if (bytes[0] !== MAGIC) throw new ScenarioLinkError(NOT_WALKY);
-  if (bytes[1] !== CODEC_VERSION) throw new ScenarioLinkError(WRONG_VERSION);
+  if (!ACCEPTED_VERSIONS.has(bytes[1])) throw new ScenarioLinkError(WRONG_VERSION);
   const flags = bytes[2];
   if ((flags & ~KNOWN_FLAGS) !== 0) throw new ScenarioLinkError(WRONG_VERSION);
   return { flags, body: bytes.subarray(3) };
@@ -349,7 +397,9 @@ export function readHeader(bytes: Uint8Array): { flags: number; body: Uint8Array
 export function bodyFlags(core: ScenarioCore): number {
   return FLAG_SPEED_MPS
     | ((core.labels?.length ?? 0) > 0 ? FLAG_LABELS : 0)
-    | ((core.generators?.length ?? 0) > 0 ? FLAG_GENERATORS : 0);
+    | ((core.generators?.length ?? 0) > 0 ? FLAG_GENERATORS : 0)
+    | (core.walls.some((w) => w.generator) ? FLAG_WALL_GENERATORS : 0)
+    | (core.walls.some((w) => w.generator?.outFacing) ? FLAG_DOOR_FACE : 0);
 }
 
 /** The scenario as bytes: a three-byte header followed by the body. */
@@ -492,6 +542,40 @@ export function encodeScenarioBody(core: ScenarioCore): Uint8Array {
     }
   }
 
+  // After the point generators, and only when a wall is actually a door: the
+  // block above already lets a reader that does not know about this one place
+  // an equivalent free-standing block, so this is purely the exact round trip
+  // for a build that does. Ported from iOS's FLAG_WALL_GENERATORS tail.
+  const wallGenerators = core.walls
+    .map((wall, i) => ({ wall, i }))
+    .filter(({ wall }) => wall.generator);
+  if (wallGenerators.length > 0) {
+    w.varint(wallGenerators.length);
+    for (const { wall, i } of wallGenerators) {
+      const generator = wall.generator!;
+      w.varint(i);
+      w.varint(generator.rate);
+      const index = indexOfId.get(generator.goal);
+      w.varint(index === undefined ? 0 : index + 1);
+    }
+  }
+
+  // Last of all, and only for a door that has been told which side to use --
+  // most have not, and the default is derived rather than stored. Ported from
+  // iOS's FLAG_DOOR_FACE tail.
+  const doorFaces = core.walls
+    .map((wall, i) => ({ wall, i }))
+    .filter(({ wall }) => wall.generator?.outFacing);
+  if (doorFaces.length > 0) {
+    w.varint(doorFaces.length);
+    for (const { wall, i } of doorFaces) {
+      const facing = wall.generator!.outFacing!;
+      w.varint(i);
+      w.zigzag(Math.round(facing[0] * FACING_QUANTUM));
+      w.zigzag(Math.round(facing[1] * FACING_QUANTUM));
+    }
+  }
+
   return w.finish();
 }
 
@@ -631,6 +715,46 @@ export function decodeScenarioBody(bytes: Uint8Array, flags = 0): ScenarioCore {
       const goalIndex = r.varint();
       const goal = goalIndex > 0 && goalIndex <= walls.length ? walls[goalIndex - 1].id : -1;
       generators.push({ at: [gx, gy], rate, goal, color });
+    }
+  }
+
+  // After the point generators: which walls are really doors. Colour is not on
+  // this wire -- it rides on the point block above, on iOS -- but it is fully
+  // derived from the goal the same way scenario.buildWorld would default it, so
+  // it is worked out here rather than carried redundantly. Ported from iOS's
+  // FLAG_WALL_GENERATORS tail.
+  if (flags & FLAG_WALL_GENERATORS) {
+    const wallGeneratorCount = r.count(LIMITS.maxGenerators, 'generators');
+    for (let i = 0; i < wallGeneratorCount; i++) {
+      const index = r.varint();
+      if (index >= walls.length) throw new ScenarioLinkError('that link names a wall it does not carry');
+      const rate = r.varint();
+      const goalIndex = r.varint();
+      const goalWallIndex = goalIndex > 0 && goalIndex <= walls.length ? goalIndex - 1 : -1;
+      const wallGenerator: SerializedWallGenerator = {
+        rate,
+        goal: goalWallIndex >= 0 ? walls[goalWallIndex].id : -1,
+        color: goalWallIndex >= 0 ? walls[goalWallIndex].color : WHITE,
+      };
+      walls[index].generator = wallGenerator;
+    }
+  }
+
+  // Last of all: which of those doors has been told which side to use. Ported
+  // from iOS's FLAG_DOOR_FACE tail.
+  if (flags & FLAG_DOOR_FACE) {
+    const doorFaceCount = r.count(LIMITS.maxGenerators, 'generators');
+    for (let i = 0; i < doorFaceCount; i++) {
+      const index = r.varint();
+      if (index >= walls.length) throw new ScenarioLinkError('that link names a wall it does not carry');
+      const x = r.zigzag() / FACING_QUANTUM;
+      const y = r.zigzag() / FACING_QUANTUM;
+      const span = Math.hypot(x, y);
+      // Zero-length: dropped rather than refused, the same as a door that was
+      // simply never told a side -- "both sides open".
+      if (span === 0) continue;
+      const generator = walls[index].generator;
+      if (generator) generator.outFacing = [x / span, y / span];
     }
   }
 

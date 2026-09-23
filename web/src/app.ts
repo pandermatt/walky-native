@@ -3,9 +3,9 @@ import { LABEL_MIN_PX, Overlay, type EditingLabel, type RecordFrame, type Screen
 import { Viewport, type Bounds } from './render/viewport';
 import { toCss, BACKGROUND, WHITE, type RGB } from './palette';
 import {
-  DEFAULT_SETTINGS, GENERATOR_CELLS, generatorContains, generatorRoundedSquare, generatorSquare,
-  makeGenerator, makeLabel, makeWall, rectanglePolygon, wallContains,
-  type Generator, type Label, type LabelStyle, type Settings, type Wall, type WallOptions,
+  DEFAULT_SETTINGS, GENERATOR_CELLS, generatorMouth, generatorRoundedSquare,
+  makeGenerator, makeLabel, makeWall, rectanglePolygon, wallContains, wallMiddle,
+  type Label, type LabelStyle, type Settings, type Wall, type WallOptions,
 } from './state/model';
 import { expandPolygon, pointInPolygon, type Point } from './sim/geometry';
 import { Clock } from './sim/clock';
@@ -18,6 +18,7 @@ import {
   type Scenario, type ScenarioCore, type SerializedAgent,
 } from './state/scenario';
 import { LINK_MAX_CHARS, LINK_SAFE_CHARS, shareUrl } from './state/shareLink';
+import { decodeMapFile, encodeMapFile, suggestedMapFileName } from './state/mapFile';
 import { SettingsSheet } from './ui/settingsSheet';
 import { confirmAction } from './ui/confirmDialog';
 import { ContextPanel } from './ui/contextPanel';
@@ -82,15 +83,15 @@ const FPS_WINDOW_MS = 1000;
  * The map as it was, kept so an edit can be taken back.
  *
  * Walls are cloned one level deep because `isGoal` and `selected` are written
- * in place; the polygons under them never are, so the geometry is shared rather
- * than copied and a snapshot costs a handful of objects. The crowd is the same
- * story -- see Agents.snapshot for what it keeps.
+ * in place, and a wall that is a door has its generator cloned with it, one
+ * level deeper again -- rate and goal are written in place too, on the copy
+ * `checkpoint` made. The polygons underneath are never written to, so the
+ * geometry is shared rather than copied and a snapshot costs a handful of
+ * objects. The crowd is the same story -- see Agents.snapshot for what it keeps.
  */
 interface MapSnapshot {
   walls: Wall[];
   labels: Label[];
-  /** Cloned one level deep like the walls: goal, rate and selected are written in place. */
-  generators: Generator[];
   agents: AgentsSnapshot;
 }
 
@@ -130,7 +131,6 @@ export class App {
 
   private walls: Wall[] = [];
   private labels: Label[] = [];
-  private generators: Generator[] = [];
   /** The label being typed, or null. Not part of the map until it is finished. */
   private editingLabel: EditingLabel | null = null;
   private textCaret: TextCaret;
@@ -280,8 +280,8 @@ export class App {
       // back in your hand". No checkpoint: it is a slider, and the others do not
       // take one either; a drag would otherwise be forty undo steps.
       if (key === 'generatorRate') {
-        for (const generator of this.generators) {
-          if (generator.selected) generator.rate = this.settings.generatorRate;
+        for (const wall of this.walls) {
+          if (wall.generator && wall.selected) wall.generator.rate = this.settings.generatorRate;
         }
       }
       // Both panels can show the same setting, so keep them in step.
@@ -298,6 +298,8 @@ export class App {
     this.settingsSheet = new SettingsSheet(
       this.settings, onSettingChange,
       () => this.copyLinkToClipboard(), () => this.copyMapToClipboard(),
+      (bytes) => this.importMapFile(bytes).then(({ what }) => `Opened — ${what}.`),
+      () => this.exportMapFile(),
       () => this.toolbar.setPressed('settings', true),
       () => this.toolbar.setPressed('settings', false),
     );
@@ -355,14 +357,24 @@ export class App {
       for (const p of spots) this.agents.add(p);
       this.touch();
     },
-    addGenerator: (at) => {
-      // A door with no room in it for anybody to stand is a door that can never
-      // let anybody out -- the same bargain the border tool strikes with a frame
-      // too small to hold a crowd, refused rather than silently made.
-      if (this.pedestrianBlock(at, GENERATOR_CELLS).length === 0) return false;
+    toggleGeneratorAt: (at) => {
+      const hit = this.pickWall(at);
+      if (!hit) return false;
       this.checkpoint();
-      const generator = makeGenerator(at, this.settings.generatorRate);
-      this.generators = [...this.generators, generator];
+      if (hit.generator) {
+        hit.generator = undefined;
+      } else {
+        const generator = makeGenerator(this.settings.generatorRate);
+        // Pinned to the map's sole goal, if it has exactly one -- the same
+        // courtesy a freshly drawn wall gets none of, but a door is drawn to be
+        // aimed at something, and a map with one goal already answers where.
+        const goals = this.walls.filter((w) => w.isGoal);
+        if (goals.length === 1) {
+          generator.goal = goals[0].id;
+          generator.color = goals[0].color;
+        }
+        hit.generator = generator;
+      }
       this.touch();
       return true;
     },
@@ -374,18 +386,19 @@ export class App {
       // With a selection, the goal applies to it alone; with nothing selected it
       // applies to everyone, as Map.setGoalForSelectedPedestrians did.
       //
-      // A generator is in "everyone" as squarely as a pedestrian is, and pinning
-      // one is the more consequential half: a pedestrian is sent somewhere once,
-      // a generator sends everybody it will ever let out.
+      // A door is in "everyone" as squarely as a pedestrian is, and pinning one
+      // is the more consequential half: a pedestrian is sent somewhere once, a
+      // door sends everybody it will ever let out.
       const onlySelected = this.selectionCount() > 0;
       for (let i = 0; i < this.agents.count; i++) {
         if (onlySelected && !this.agents.selected[i]) continue;
         this.agents.setGoal(i, hit.id, hit.color);
       }
-      for (const generator of this.generators) {
-        if (onlySelected && !generator.selected) continue;
-        generator.goal = hit.id;
-        generator.color = hit.color;
+      for (const wall of this.walls) {
+        if (!wall.generator) continue;
+        if (onlySelected && !wall.selected) continue;
+        wall.generator.goal = hit.id;
+        wall.generator.color = hit.color;
       }
       this.pruneGoals(hit.id);
       this.navDirty = true;
@@ -397,19 +410,19 @@ export class App {
     },
     selectPedestrianAt: (at, extend) => {
       if (!extend) this.clearSelection();
-      // The generator first, against the topmost-wins rule the rest of the app
+      // The door first, against the topmost-wins rule the rest of the app
       // clicks by -- and deliberately.
       //
       // A door is a fixture and the people in its mouth are passing through it,
       // most of them its own output. Taking the pedestrian would mean a running
-      // generator could not be picked at all: the one square on the map
-      // guaranteed to have somebody standing in it is the square people are
-      // being let out of. Nothing is lost by it that the lasso does not still
-      // do, and the eraser -- which shows you what it is about to take before it
-      // takes it -- goes on answering topmost-wins.
-      const generator = this.pickGenerator(at);
-      if (generator) {
-        generator.selected = true;
+      // door could not be picked at all: its mouth is guaranteed to have
+      // somebody standing in it, since that is the square people are being let
+      // out into. Nothing is lost by it that the lasso does not still do, and
+      // the eraser -- which shows you what it is about to take before it takes
+      // it -- goes on answering topmost-wins.
+      const generatorWall = this.pickGeneratorWall(at);
+      if (generatorWall) {
+        generatorWall.selected = true;
       } else {
         const hit = this.agents.indexAt(at, this.settings.pedestrianRadius);
         if (hit >= 0) this.agents.selected[hit] = 1;
@@ -423,10 +436,11 @@ export class App {
           this.agents.selected[i] = 1;
         }
       }
-      // By its centre, not its corners: a lasso thrown round a door catches the
-      // door, and one drawn past the edge of one does not take it along.
-      for (const generator of this.generators) {
-        if (pointInPolygon(lasso, generator.at)) generator.selected = true;
+      // By the wall's own middle, not its corners: a lasso thrown round a door
+      // catches the door, and one drawn past the edge of one does not take it
+      // along.
+      for (const wall of this.walls) {
+        if (wall.generator && pointInPolygon(lasso, wallMiddle(wall))) wall.selected = true;
       }
       this.afterSelectionChange();
     },
@@ -737,7 +751,7 @@ export class App {
     // second, which is one control and two sentences -- see afterSelectionChange
     // for the moment it changes which.
     const generators = this.tool?.id === 'generator'
-      || this.generators.some((g) => g.selected);
+      || this.walls.some((w) => w.generator && w.selected);
     const keys: (keyof Settings)[] = [];
     if (brush) keys.push('brushSize', 'personalSpace');
     if (generators) keys.push('generatorRate');
@@ -787,15 +801,16 @@ export class App {
       for (const polygon of wall.polygons) for (const p of polygon) add(p[0], p[1]);
     }
     for (let i = 0; i < this.agents.count; i++) add(this.agents.x[i], this.agents.y[i]);
-    // The footprint's corners, not its centre: a generator is a shape on the map,
-    // and reset-zoom framing one half off the screen would be a bug about the
-    // one object whose whole job is being aimed at. The square rather than the
-    // rounded outline because the two reach exactly as far -- and the square
-    // says so in four points.
-    for (const generator of this.generators) {
-      for (const p of generatorSquare(generator.at, this.settings.pedestrianRadius)) {
-        add(p[0], p[1]);
-      }
+    // A door's own wall is already in the first loop; what it adds is the
+    // mouth, which can stand well clear of it -- reset-zoom framing the block
+    // people actually appear in half off the screen would be a bug about the
+    // one point on the map whose whole job is being aimed at.
+    const r = this.settings.pedestrianRadius;
+    for (const wall of this.walls) {
+      if (!wall.generator) continue;
+      const [mx, my] = generatorMouth(wall, this.walls, r);
+      add(mx - GENERATOR_CELLS * r, my - GENERATOR_CELLS * r);
+      add(mx + GENERATOR_CELLS * r, my + GENERATOR_CELLS * r);
     }
     // The anchor only: where a label starts is where it is, and how far the
     // word runs from there depends on a zoom the camera has not been set to yet.
@@ -811,7 +826,6 @@ export class App {
   private resetWorld(): void {
     this.walls = [];
     this.labels = [];
-    this.generators = [];
     this.agents.clear();
     this.metrics.reset();
     this.play(false);
@@ -847,10 +861,11 @@ export class App {
         // Back to the top of each door's schedule, not just to an empty queue:
         // the same clumps then come through at the same moments, so a layout can
         // be changed and tried again under the demand it was tried under before.
-        for (const generator of this.generators) {
-          generator.owed = 0;
-          generator.beat = 0;
-          generator.wait = 0;
+        for (const wall of this.walls) {
+          if (!wall.generator) continue;
+          wall.generator.owed = 0;
+          wall.generator.beat = 0;
+          wall.generator.wait = 0;
         }
         this.agents.resetPositions(this.wallColors());
         // A fresh run deserves a fresh diagram: the replayed demand is the
@@ -1190,8 +1205,8 @@ export class App {
 
   /** Nothing drawn and nobody standing: what makes a question about losing it moot. */
   private isEmpty(): boolean {
-    return this.walls.length === 0 && this.agents.count === 0
-      && this.labels.length === 0 && this.generators.length === 0;
+    // A door is a wall, so an empty wall list already means no doors either.
+    return this.walls.length === 0 && this.agents.count === 0 && this.labels.length === 0;
   }
 
   /**
@@ -1209,11 +1224,14 @@ export class App {
    */
   private checkpoint(): void {
     this.undoStack.push({
-      walls: this.walls.map((w) => ({ ...w })),
+      // A door's generator is cloned along with its wall, one level deeper
+      // again: rate and goal are written in place on whichever copy is live,
+      // and a shared object would let an edit after the checkpoint reach back
+      // and rewrite the snapshot it was taken from.
+      walls: this.walls.map((w) => ({ ...w, generator: w.generator ? { ...w.generator } : undefined })),
       // A shallow copy each, like the walls: a label's text and place are
       // replaced rather than edited, so nothing here is written through.
       labels: this.labels.map((l) => ({ ...l })),
-      generators: this.generators.map((g) => ({ ...g })),
       agents: this.agents.snapshot(),
     });
     // Oldest goes first once the stack is full, so the depth is a window on the
@@ -1235,7 +1253,6 @@ export class App {
     if (!previous) return;
     this.walls = previous.walls;
     this.labels = previous.labels;
-    this.generators = previous.generators;
     this.agents.restore(previous.agents);
     this.navDirty = true;
     // Whatever is half-drawn was drawn on a map that no longer exists.
@@ -1298,11 +1315,6 @@ export class App {
         this.agents.removeAt(i);
       }
     }
-    // And so is a generator built over, for the same reason and a stronger one:
-    // buried, its footprint is inside a wall, so every spot it tries to let
-    // somebody out at is refused and it stands there looking like a door that
-    // has stopped working.
-    this.generators = this.generators.filter((g) => !wallContains(wall, g.at));
   }
 
   /**
@@ -1341,43 +1353,57 @@ export class App {
     return null;
   }
 
-  /** The generator under a point, or null. Topmost wins, as with the walls. */
-  private pickGenerator(at: Point): Generator | null {
-    for (let i = this.generators.length - 1; i >= 0; i--) {
-      if (generatorContains(this.generators[i], at, this.settings.pedestrianRadius)) {
-        return this.generators[i];
-      }
+  /** The door under a point, or null. Topmost wins, as with the walls. */
+  private pickGeneratorWall(at: Point): Wall | null {
+    for (let i = this.walls.length - 1; i >= 0; i--) {
+      if (this.walls[i].generator && wallContains(this.walls[i], at)) return this.walls[i];
     }
     return null;
   }
 
   /**
-   * Everything currently picked out, pedestrians and generators together.
+   * The wall whose door's *mouth* -- the block people actually come out of --
+   * is under a point, or null. What the eraser aims at, since that block is the
+   * visible, clickable picture of a door and the wall underneath it is a
+   * separate object the eraser reaches by its own polygon instead.
+   */
+  private pickGeneratorMouth(at: Point): Wall | null {
+    const r = this.settings.pedestrianRadius;
+    for (let i = this.walls.length - 1; i >= 0; i--) {
+      const wall = this.walls[i];
+      if (!wall.generator) continue;
+      if (pointInPolygon(generatorRoundedSquare(generatorMouth(wall, this.walls, r), r), at)) return wall;
+    }
+    return null;
+  }
+
+  /**
+   * Everything currently picked out, pedestrians and doors together.
    *
    * One number rather than two because one question is being asked of it: does a
    * goal apply to a chosen few or to the whole map. The selection tool asks the
    * same thing of it to decide whether its gesture caught anybody.
    */
   private selectionCount(): number {
-    return this.agents.selectionCount + this.generators.filter((g) => g.selected).length;
+    return this.agents.selectionCount
+      + this.walls.filter((w) => w.generator && w.selected).length;
   }
 
   private clearSelection(): void {
     this.agents.clearSelection();
-    for (const generator of this.generators) generator.selected = false;
+    for (const wall of this.walls) if (wall.generator) wall.selected = false;
   }
 
   /**
-   * Repaints, and puts the rate slider on the generator that was just picked.
+   * Repaints, and puts the rate slider on the door that was just picked.
    *
-   * The slider is one control saying two things -- what the next generator will
-   * be, and what this one is -- and this is the moment it changes which. Loading
-   * the selected generator's own rate into the setting is what lets the panel go
-   * on being built from the settings, with nothing in it that knows a generator
-   * exists.
+   * The slider is one control saying two things -- what the next door will be,
+   * and what this one is -- and this is the moment it changes which. Loading the
+   * selected door's own rate into the setting is what lets the panel go on
+   * being built from the settings, with nothing in it that knows a door exists.
    */
   private afterSelectionChange(): void {
-    const picked = this.generators.find((g) => g.selected);
+    const picked = this.walls.find((w) => w.generator && w.selected)?.generator;
     if (picked) {
       this.settings.generatorRate = picked.rate;
       this.settingsSheet.sync();
@@ -1424,20 +1450,23 @@ export class App {
         outlines: [ring([this.agents.x[i], this.agents.y[i]], halo)],
       };
     }
-    // Then the generators, which are drawn over the walls and under the crowd,
-    // and so are picked in exactly that order.
-    const generator = this.pickGenerator(at);
-    if (generator) {
+    // Then a door's mouth, which is drawn over the walls and under the crowd,
+    // and so is picked in exactly that order. Erasing it un-marks the door and
+    // leaves the wall standing -- the wall is what a click on it, below, takes.
+    const mouthWall = this.pickGeneratorMouth(at);
+    if (mouthWall) {
+      const r = this.settings.pedestrianRadius;
       return {
         kind: 'generator',
-        id: generator.id,
-        outlines: [generatorRoundedSquare(generator.at, this.settings.pedestrianRadius)],
+        id: mouthWall.id,
+        outlines: [generatorRoundedSquare(generatorMouth(mouthWall, this.walls, r), r)],
       };
     }
 
     const wall = this.pickWall(at);
     // A wall's own polygons: for a border frame that is its four bars, which
-    // outlines exactly the frame that is about to go.
+    // outlines exactly the frame that is about to go -- door and all, since a
+    // wall that is gone has nothing left to carry one.
     return wall ? { kind: 'wall', id: wall.id, outlines: wall.polygons } : null;
   }
 
@@ -1467,13 +1496,13 @@ export class App {
       return true;
     }
 
-    const generator = this.pickGenerator(at);
-    if (generator) {
+    const mouthWall = this.pickGeneratorMouth(at);
+    if (mouthWall) {
       if (!sameStroke) this.checkpoint();
-      // A new array, for the reason the walls take one: deck.gl compares props
-      // shallowly and the same array back is an array it believes nothing
-      // happened to.
-      this.generators = this.generators.filter((g) => g !== generator);
+      // Un-marks the door and leaves the wall standing, exactly as the
+      // generator tool's own toggle does -- a click on the wall itself, below,
+      // is what takes the wall.
+      mouthWall.generator = undefined;
       // Whatever it had already let out goes on walking. Those are pedestrians
       // on the map now, with somewhere to be; taking them with the door would be
       // deleting a crowd nobody pointed at.
@@ -1493,10 +1522,10 @@ export class App {
     // And any door aimed at it goes back to being unpinned -- white, and idle,
     // rather than quietly emitting into a goal Navigation no longer has a field
     // for.
-    for (const generator of this.generators) {
-      if (generator.goal !== wall.id) continue;
-      generator.goal = -1;
-      generator.color = WHITE;
+    for (const other of this.walls) {
+      if (other.generator?.goal !== wall.id) continue;
+      other.generator.goal = -1;
+      other.generator.color = WHITE;
     }
     this.navDirty = true;
     this.touch();
@@ -1630,11 +1659,11 @@ export class App {
       const g = this.agents.goal[i];
       if (g >= 0) wanted.add(g);
     }
-    // A generator's goal counts even with nobody walking to it yet: it is a
-    // standing claim on that wall, and unmarking it would take away the field the
-    // next pedestrian out of the door is going to need.
-    for (const generator of this.generators) {
-      if (generator.goal >= 0) wanted.add(generator.goal);
+    // A door's goal counts even with nobody walking to it yet: it is a standing
+    // claim on that wall, and unmarking it would take away the field the next
+    // pedestrian out of the door is going to need.
+    for (const wall of this.walls) {
+      if (wall.generator && wall.generator.goal >= 0) wanted.add(wall.generator.goal);
     }
     for (const w of this.walls) w.isGoal = wanted.has(w.id);
   }
@@ -1667,11 +1696,16 @@ export class App {
    * pile that never goes away.
    */
   private emit(): void {
-    for (const generator of this.generators) {
-      if (generator.goal < 0) continue;
+    const r = this.settings.pedestrianRadius;
+    for (const wall of this.walls) {
+      const generator = wall.generator;
+      if (!generator || generator.goal < 0) continue;
 
       if (generator.wait <= 0) {
-        const burst = burstAt(generator.at, generator.beat, generator.rate);
+        // Hashed on the wall's own middle, not its mouth: the same door on the
+        // same map then replays the same demand whichever way it is facing,
+        // which is the invariant the crowd's own traits already keep.
+        const burst = burstAt(wallMiddle(wall), generator.beat, generator.rate);
         generator.owed = Math.min(generator.owed + burst.size, QUEUE_MAX);
         generator.wait = burst.gap;
         generator.beat++;
@@ -1682,12 +1716,12 @@ export class App {
       // hash, which is not a thing to do once a frame per idle door.
       if (generator.owed < 1) continue;
 
-      // The brush's own legality test over the generator's footprint: not inside
-      // a wall, and not on top of somebody already standing there -- and it
-      // already refuses two spots within a diameter of each other, so filling
-      // every one of them at once is legal by construction. Empty means the
-      // doorway is full, and the queue simply waits another frame.
-      for (const spot of this.pedestrianBlock(generator.at, GENERATOR_CELLS)) {
+      // The brush's own legality test over the block just outside the wall:
+      // not inside a wall, and not on top of somebody already standing there --
+      // and it already refuses two spots within a diameter of each other, so
+      // filling every one of them at once is legal by construction. Empty
+      // means the doorway is full, and the queue simply waits another frame.
+      for (const spot of this.pedestrianBlock(generatorMouth(wall, this.walls, r), GENERATOR_CELLS)) {
         if (generator.owed < 1) break;
         this.agents.addSpawned(spot, generator.goal, generator.color);
         generator.owed--;
@@ -2040,21 +2074,23 @@ export class App {
     return out;
   }
 
-  /** The generators as the scene draws them; see agentViews for the same bargain. */
+  /** The doors as the scene draws them, at their mouths; see agentViews for the same bargain. */
   private generatorViews(): GeneratorView[] {
     const r = this.settings.pedestrianRadius;
-    return this.generators.map((g) => ({
-      id: g.id,
-      polygon: generatorRoundedSquare(g.at, r),
-      color: g.color,
-      selected: g.selected,
+    return this.walls.filter((w) => w.generator).map((w) => ({
+      // The wall's own id: a wall carries at most one door, so it is as stable
+      // and as unique a key for the door's view as it is for the wall's own.
+      id: w.id,
+      polygon: generatorRoundedSquare(generatorMouth(w, this.walls, r), r),
+      color: w.generator!.color,
+      selected: w.selected,
     }));
   }
 
-  /** The generators a goal assignment would hit: the selection, or all of them. */
-  private targetableGenerators(): Generator[] {
+  /** The doors a goal assignment would hit: the selection, or all of them. */
+  private targetableGenerators(): Wall[] {
     const onlySelected = this.selectionCount() > 0;
-    return this.generators.filter((g) => !onlySelected || g.selected);
+    return this.walls.filter((w) => w.generator && (!onlySelected || w.selected));
   }
 
   /** The pedestrians a goal assignment would hit: the selection, or everyone. */
@@ -2078,16 +2114,17 @@ export class App {
    * is the entire question being answered by the click.
    */
   private targetableAgents(): Point[] {
+    const r = this.settings.pedestrianRadius;
     return [
       ...this.targetableIndices().map((i) => [this.agents.x[i], this.agents.y[i]] as Point),
-      ...this.targetableGenerators().map((g) => g.at),
+      ...this.targetableGenerators().map((w) => generatorMouth(w, this.walls, r)),
     ];
   }
 
   private targetableColors(): RGB[] {
     return [
       ...this.targetableIndices().map((i) => unpackRgb(this.agents.color[i])),
-      ...this.targetableGenerators().map((g) => g.color),
+      ...this.targetableGenerators().map((w) => w.generator!.color),
     ];
   }
 
@@ -2142,7 +2179,6 @@ export class App {
       },
       walls: this.walls,
       labels: this.labels,
-      generators: this.generators,
       agents,
       stuck,
     });
@@ -2208,10 +2244,9 @@ export class App {
 
     Object.assign(this.settings, clampSettings(core.settings));
 
-    const { walls, agents, labels, generators } = buildWorld(core);
+    const { walls, agents, labels } = buildWorld(core);
     this.walls = walls;
     this.labels = labels;
-    this.generators = generators;
     for (const agent of agents) this.agents.addRestored(agent);
 
     this.viewport.targetX = core.view.targetX;
@@ -2225,6 +2260,28 @@ export class App {
     this.touch();
   }
 
+  /**
+   * A `.walky` file's bytes, opened -- dropped on the map or chosen through
+   * Settings. Decoding is `mapFile.decodeMapFile`'s job; this is only the last
+   * step, handing the result to loadScenario the same way a shared link does.
+   *
+   * Throws whatever decodeMapFile threw -- a ScenarioLinkError with a message
+   * fit to show as-is -- so the caller can put it in front of whoever tried.
+   */
+  async importMapFile(bytes: Uint8Array): Promise<{ what: string }> {
+    const core = await decodeMapFile(bytes);
+    this.loadScenario(core);
+    const many = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+    return { what: `${many(core.walls.length, 'wall')}, ${many(core.agents.length, 'pedestrian')}` };
+  }
+
+  /** The map as `.walky` bytes, ready to save, with a name to suggest for it. */
+  async exportMapFile(): Promise<{ bytes: Uint8Array; name: string }> {
+    const core = this.snapshot();
+    const bytes = await encodeMapFile(core);
+    return { bytes, name: suggestedMapFileName(core) };
+  }
+
   private debugLines(): string[] {
     const m = this.mouseWorld;
     const walking = this.metrics.readout();
@@ -2232,7 +2289,7 @@ export class App {
       `Pedestrians Alive: ${this.agents.count}`,
       `Selected: ${this.agents.selectionCount}`,
       `Walls: ${this.walls.length}`,
-      `Generators: ${this.generators.length}`,
+      `Generators: ${this.walls.filter((w) => w.generator).length}`,
       `Labels: ${this.labels.length}`,
       `Zoom level: ${this.viewport.zoomLevel} (scale ${this.viewport.scale.toFixed(3)})`,
       m ? `X: ${Math.round(m[0])} / Y: ${Math.round(m[1])}` : 'X: - / Y: -',

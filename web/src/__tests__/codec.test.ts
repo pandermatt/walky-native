@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CODEC_VERSION, FLAG_DEFLATED, FLAG_GENERATORS, FLAG_LABELS, FLAG_SPEED_MPS, LIMITS, ScenarioLinkError,
+  CODEC_VERSION, FLAG_DEFLATED, FLAG_DOOR_FACE, FLAG_GENERATORS, FLAG_LABELS, FLAG_SPEED_MPS,
+  FLAG_WALL_GENERATORS, LIMITS, ScenarioLinkError,
   base64UrlToBytes, bytesToBase64Url,
   decodeScenario, decodeScenarioBody, encodeScenario, encodeScenarioBody,
   scenarioHeader,
@@ -296,6 +297,72 @@ describe('generators, which ride in the flags as the labels do', () => {
   });
 });
 
+describe('doors, ported from the iOS port -- a wall carrying a generator', () => {
+  const doorWall = () => wall(4, [box(0, 0)], {
+    generator: { rate: 6, goal: -1, color: [200, 30, 90] },
+  });
+
+  it('round trips at version 4, byte-identical up to its own tail', () => {
+    const withoutDoor = core({ walls: [wall(4, [box(0, 0)])] });
+    const withDoor = core({ walls: [doorWall()] });
+    const before = encodeScenario(withoutDoor);
+    const after = encodeScenario(withDoor);
+    // Ported from iOS's own guarantee: everything before the wall-generator
+    // tail is byte-identical to what a build that knows nothing about doors
+    // writes for the same map -- the header's version and flags bytes aside,
+    // which are exactly what announce the tail that follows them.
+    expect(after.subarray(3, before.length)).toEqual(before.subarray(3));
+    expect(after[1]).toBe(4);
+    expect(after[2]).toBe(FLAG_SPEED_MPS | FLAG_WALL_GENERATORS);
+
+    const decoded = decodeScenario(after);
+    expect(decoded.walls[0].generator).toEqual({ rate: 6, goal: -1, color: [255, 255, 255] });
+  });
+
+  it('carries the goal a door is pinned to, repointed like any other', () => {
+    const before = core({
+      walls: [
+        wall(9, [box(900, 400)], { isGoal: true, color: [255, 200, 0] }),
+        wall(4, [box(0, 0)], { generator: { rate: 3, goal: 9, color: [1, 2, 3] } }),
+      ],
+    });
+    const after = decodeScenario(encodeScenario(before));
+    expect(after.walls[1].generator).toEqual({ rate: 3, goal: 9, color: [255, 200, 0] });
+  });
+
+  it('carries a facing at version 6, as a unit vector', () => {
+    const before = core({
+      walls: [wall(4, [box(0, 0)], {
+        generator: { rate: 6, goal: -1, color: [255, 255, 255], outFacing: [0.6, 0.8] },
+      })],
+    });
+    const bytes = encodeScenario(before);
+    expect(bytes[1]).toBe(6);
+    expect(bytes[2]).toBe(FLAG_SPEED_MPS | FLAG_WALL_GENERATORS | FLAG_DOOR_FACE);
+    const after = decodeScenario(bytes);
+    expect(after.walls[0].generator?.outFacing?.[0]).toBeCloseTo(0.6, 3);
+    expect(after.walls[0].generator?.outFacing?.[1]).toBeCloseTo(0.8, 3);
+  });
+
+  it('accepts a version-4 or version-6 header, unlike the versions either side of them', () => {
+    for (const version of [4, 6]) {
+      const bytes = encodeScenario(core());
+      bytes[1] = version;
+      expect(() => decodeScenario(bytes)).not.toThrow();
+    }
+  });
+
+  it('refuses a wall-generator or door-face tail naming a wall it does not carry', () => {
+    const bytes = encodeScenario(core({ walls: [doorWall()] }));
+    // The tail's own wall index, the byte right after the header-implied count:
+    // corrupt it to a wall index far past the one wall in this payload.
+    const forged = new Uint8Array(bytes);
+    const tailStart = encodeScenario(core({ walls: [wall(4, [box(0, 0)])] })).length;
+    forged[tailStart + 1] = 99;
+    expect(() => decodeScenario(forged)).toThrow(/does not carry/);
+  });
+});
+
 const LINK_BUDGET = 2000;
 
 describe('a link the codec will not accept', () => {
@@ -312,8 +379,10 @@ describe('a link the codec will not accept', () => {
   it('refuses a version it does not know, in either direction', () => {
     // Older matters as much as newer: a payload written before a field was
     // dropped misreads exactly as badly as one written after a field was added,
-    // and there is no skipping an unknown field in a delta stream.
-    for (const version of [CODEC_VERSION + 1, CODEC_VERSION - 1]) {
+    // and there is no skipping an unknown field in a delta stream. 5 is
+    // permanently spent -- iOS minted and retired VERSION_DOOR_SIDES in the
+    // same piece of work -- so it is refused exactly like any other stranger.
+    for (const version of [CODEC_VERSION - 1, 5, 7]) {
       const bytes = encodeScenario(core());
       bytes[1] = version;
       expect(() => decodeScenario(bytes)).toThrow(/different version of Walky/);
@@ -322,7 +391,9 @@ describe('a link the codec will not accept', () => {
 
   it('refuses a flag it does not know', () => {
     const bytes = encodeScenario(core());
-    bytes[2] = 0x40;
+    // 0x20: iOS's retired FLAG_DOOR_SIDES, permanently excluded on purpose --
+    // see FLAG_WALL_GENERATORS's doc comment in codec.ts.
+    bytes[2] = 0x20;
     expect(() => decodeScenario(bytes)).toThrow(/different version of Walky/);
   });
 

@@ -91,7 +91,7 @@ const GROUPS: { name: string; buttons: ButtonSpec[] }[] = [
       // the generator spent its first life on 0, at the far end of the capsule
       // from the tool it is a variety of.
       { key: 'pedestrian', icon: 'pedestrian.png', title: 'Add pedestrians', kind: 'tool', shortcut: '4', press: '4' },
-      { key: 'generator', icon: 'generator.svg', title: 'Add generator', kind: 'tool', shortcut: '5', press: '5' },
+      { key: 'generator', icon: 'generator.svg', title: 'Mark generator', kind: 'tool', shortcut: '5', press: '5' },
       { key: 'goal', icon: 'goal.png', title: 'Mark goal', kind: 'tool', shortcut: '6', press: '6' },
       // then the pair that acts on what is already down instead of adding to it.
       // The eraser is next to the selection tool and not next to the walls it
