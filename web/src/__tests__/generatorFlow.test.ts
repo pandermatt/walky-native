@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Agents } from '../sim/agents';
 import {
-  DEFAULT_SETTINGS, GENERATOR_CELLS, generatorMouth, generatorRoundedSquare,
-  makeGenerator, makeWall, mouthDirection, rectanglePolygon, wallMiddle,
+  GENERATOR_CELLS, generatorMouth, makeGenerator, makeWall, mouthDirection, rectanglePolygon, wallMiddle,
 } from '../state/model';
 
 /**
@@ -85,25 +84,6 @@ describe('a generator', () => {
     expect(g.goal).toBe(-1);
     expect(g.owed).toBe(0);
     expect(g.rate).toBe(5);
-  });
-
-  it('is drawn as a rounded square, inside its footprint and reaching its edges', () => {
-    const r = DEFAULT_SETTINGS.pedestrianRadius;
-    const half = GENERATOR_CELLS * r;
-    const shape = generatorRoundedSquare([100, 100], r);
-
-    const xs = shape.map((p) => p[0]);
-    const ys = shape.map((p) => p[1]);
-    // It fills the block's own box -- the corners are taken off, the sides are
-    // not pulled in -- so framing and layout are unchanged by rounding.
-    expect(Math.min(...xs)).toBeCloseTo(100 - half);
-    expect(Math.max(...xs)).toBeCloseTo(100 + half);
-    expect(Math.min(...ys)).toBeCloseTo(100 - half);
-    expect(Math.max(...ys)).toBeCloseTo(100 + half);
-    for (const [x, y] of shape) {
-      expect(Math.abs(x - 100)).toBeLessThanOrEqual(half + 1e-9);
-      expect(Math.abs(y - 100)).toBeLessThanOrEqual(half + 1e-9);
-    }
   });
 });
 

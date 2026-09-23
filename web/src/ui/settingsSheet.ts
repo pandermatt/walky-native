@@ -186,11 +186,15 @@ export const SHEET_CSS = `
 }
 .wk-sheet .row { min-height: 56px; display: flex; align-items: center; }
 
-/* Material's label-large: what names a group of list items. */
+/*
+ * Material's title-small: what names a group of list items. Sentence case,
+ * not the small caps Apple's own HIG asks for -- caps-and-grey is the one
+ * detail that reads as "iOS Settings" on sight, independent of anything else
+ * on the page, so it is the first thing this rework has to not do.
+ */
 .wk-sheet .group-title {
-  margin: 20px 0 8px; padding: 0 16px;
-  font-size: 12px; font-weight: 600; line-height: 16px; letter-spacing: .5px;
-  text-transform: uppercase;
+  margin: 24px 0 8px; padding: 0 16px;
+  font-size: 14px; font-weight: 600; line-height: 20px; letter-spacing: 0;
   color: var(--md-primary);
 }
 .wk-sheet .body > .group-title:first-child { margin-top: 8px; }
@@ -223,6 +227,32 @@ export const SHEET_CSS = `
   outline: 2px solid var(--md-primary); outline-offset: -2px;
 }
 .wk-sheet button.row:disabled { color: var(--md-outline); cursor: default; }
+
+/*
+ * The pair of filled-tonal buttons Open and Save are: Material's own emphasis
+ * role, a pill filled with the primary container rather than a row of tinted
+ * text. This is the single detail iOS never has -- a row can act, but it
+ * never *looks* like a button -- so it is the strongest signal in the sheet
+ * that the vocabulary changed.
+ */
+.wk-sheet .button-row {
+  display: flex; gap: 8px; padding: 12px 16px 16px; min-height: 0;
+}
+.wk-sheet button.filled {
+  flex: 1 1 0; min-width: 0;
+  padding: 10px 16px; border: 0; border-radius: 999px;
+  background: var(--md-primary-container); color: var(--md-on-primary-container);
+  font: 500 14px/20px var(--wk-font-family); letter-spacing: .1px;
+  text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer; transition: background-color .15s ease;
+}
+.wk-sheet button.filled:active {
+  background: color-mix(in srgb, var(--md-primary-container) 80%, var(--md-on-primary-container) 20%);
+}
+.wk-sheet button.filled:focus-visible {
+  outline: 2px solid var(--md-primary); outline-offset: 2px;
+}
+.wk-sheet button.filled:disabled { opacity: .5; cursor: default; }
 
 /* The head's own close button, and Done -- both Material icon/text buttons. */
 .wk-sheet .head button:focus-visible {
@@ -262,7 +292,24 @@ export const SHEET_CSS = `
   left: 6px; width: 24px; height: 24px; margin-top: -12px;
   background: var(--md-on-primary);
   transform: translateX(20px);
+  z-index: 1;
 }
+/*
+ * The check inside the on thumb -- the other detail iOS's switch has no
+ * equivalent of at all. ::before rather than a real child, since a checkbox
+ * cannot have one; a two-sided border rotated into a tick, centred on where
+ * the thumb sits once it is on. Only opacity animates: the thumb underneath
+ * is already moving, and animating the tick's own position too just blurs it.
+ */
+.wk-sheet input[type=checkbox]::before {
+  content: ''; position: absolute; z-index: 2;
+  top: 50%; left: 33px;
+  width: 10px; height: 6px; margin-top: -5px;
+  border-left: 2px solid var(--md-primary); border-bottom: 2px solid var(--md-primary);
+  transform: rotate(-45deg);
+  opacity: 0; transition: opacity .1s ease .05s;
+}
+.wk-sheet input[type=checkbox]:checked::before { opacity: 1; }
 .wk-sheet input[type=checkbox]:focus-visible {
   outline: 2px solid var(--md-primary); outline-offset: 2px;
 }
@@ -308,7 +355,8 @@ export const SHEET_CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .wk-sheet input[type=checkbox],
-  .wk-sheet input[type=checkbox]::after { transition: none; }
+  .wk-sheet input[type=checkbox]::after,
+  .wk-sheet input[type=checkbox]::before { transition: none; }
 }
 
 /*
@@ -507,7 +555,7 @@ export class SettingsSheet {
     /**
      * A row button that puts something in front of the user and says what
      * happened underneath -- "Copy link to this map" and "Copy map to
-     * clipboard" both work this way already; Open and Save use the same shape.
+     * clipboard" both work this way; a plain text row for a secondary action.
      *
      * `busy` is shared across every row this button is built for -- rather than
      * per button -- because it is the async work that is slow, and only one of
@@ -538,11 +586,41 @@ export class SettingsSheet {
       return button;
     };
 
+    /**
+     * Material's filled-tonal button: what "Open" and "Save" are, since the
+     * whole point of Material's button roles is that emphasis is visible
+     * rather than implied by a row's position in a list. Same busy/error
+     * wiring as `action`, in the button shape rather than the row shape.
+     */
+    const filledAction = (label: string, into: HTMLElement, into2: HTMLParagraphElement, run: () => Promise<string>) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'filled';
+      button.textContent = label;
+      button.addEventListener('click', async () => {
+        if (busy) return;
+        busy = true;
+        button.disabled = true;
+        into2.classList.remove('error');
+        try {
+          into2.textContent = await run();
+        } catch (err) {
+          into2.classList.add('error');
+          into2.textContent = err instanceof Error ? err.message : 'That could not be read.';
+        } finally {
+          busy = false;
+          button.disabled = false;
+        }
+      });
+      into.appendChild(button);
+      return button;
+    };
+
     this.mapNote = note();
     this.debugNote = note();
 
-    // A hidden file input, triggered by the "Open…" row -- the platform's own
-    // picker, which is what "Open" means on every OS this runs on.
+    // A hidden file input, triggered by the "Open…" button -- the platform's
+    // own picker, which is what "Open" means on every OS this runs on.
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
     this.fileInput.accept = '.walky';
@@ -553,13 +631,16 @@ export class SettingsSheet {
     /*
      * Map, first: getting a map in or out is the one thing in here you come
      * to Settings specifically to do -- everything else is a value you adjust
-     * while you are already looking at something. Opening, saving and sharing
-     * are one category -- the map's own coming and going -- so they share one
-     * group and one footnote rather than the three each used to answer to.
+     * while you are already looking at something. Opening and saving are the
+     * emphasised pair -- Material's filled-tonal buttons, side by side --
+     * sharing take a lesser plain row below them, the way a list item would.
      */
     const mapGroup = group('Map');
-    action('Open…', mapGroup, this.mapNote, () => this.openFile());
-    action('Save as .walky…', mapGroup, this.mapNote, () => this.saveFile());
+    const buttonRow = document.createElement('div');
+    buttonRow.className = 'button-row';
+    filledAction('Open…', buttonRow, this.mapNote, () => this.openFile());
+    filledAction('Save as .walky…', buttonRow, this.mapNote, () => this.saveFile());
+    mapGroup.appendChild(buttonRow);
     action('Copy link to this map', mapGroup, this.mapNote, () => this.onCopyLink());
     body.appendChild(this.mapNote);
     body.appendChild(note('note'));
