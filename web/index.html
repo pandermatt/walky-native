@@ -248,17 +248,17 @@
                 not a link. main.ts holds the same URL as the one answer to
                 "where does this point", and warns in dev if the two drift.
               -->
-              <a
-                class="button button--primary button--store"
-                data-store-link
-                href="https://apps.apple.com/app/id6811090126"
-              >
-                <svg class="apple-glyph" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M16 2H8a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V5a3 3 0 0 0-3-3zm-4 18a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4z"
-                  />
-                </svg>
-                Get Walky Go
+              <!--
+                Apple's own badge artwork (developer.apple.com/app-store/marketing/guidelines),
+                used unmodified: the preferred black lockup, since the hero ground is light.
+              -->
+              <a class="app-store-badge" data-store-link href="https://apps.apple.com/app/id6811090126">
+                <img
+                  src="./images/app-store-badge-black.svg"
+                  width="132"
+                  height="44"
+                  alt="Download on the App Store"
+                />
               </a>
 
               <a class="button button--outline button--web" href="./demo/">
@@ -560,17 +560,14 @@
           </ul>
 
           <div class="band-cta reveal">
-            <a
-              class="button button--primary button--store"
-              data-store-link
-              href="https://apps.apple.com/app/id6811090126"
-            >
-              <svg class="apple-glyph" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M16 2H8a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V5a3 3 0 0 0-3-3zm-4 18a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4z"
-                />
-              </svg>
-              Get Walky Go
+            <!-- The white lockup here, not the black one in the hero: this band's ground is black. -->
+            <a class="app-store-badge" data-store-link href="https://apps.apple.com/app/id6811090126">
+              <img
+                src="./images/app-store-badge-white.svg"
+                width="132"
+                height="44"
+                alt="Download on the App Store"
+              />
             </a>
             <a class="button button--outline button--web button--on-band" href="./demo/">
               <svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"

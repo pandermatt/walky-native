@@ -317,9 +317,12 @@ strong { font-weight: 600; font-variation-settings: 'wght' 600; color: rgba(var(
   align-items: center;
   justify-content: center;
   gap: 0.5em;
-  padding: 12px 24px;
+  padding: 12px 18px;
   border: 1px solid transparent;
-  border-radius: var(--radius-pill);
+  /* Rounded-rect rather than the pill this used to be: the App Store badge
+     beside it is Apple's own artwork, corners fixed at roughly this radius,
+     and a pill next to it read as two different shape languages in one row. */
+  border-radius: 8px;
   font-size: 0.95rem;
   font-weight: 500;
   font-variation-settings: 'wght' 500;
@@ -488,24 +491,27 @@ html[data-js] .reveal.is-visible {
   color: rgba(var(--c-text-3), 1);
 }
 
-/* ── The three controls in the hero ────────────────────────────────────────
-   One size, set by `.button` above, and one icon size. The App Store is still
-   first and still the one the page is for, but it says so by being the only
-   FILLED one -- three pills at three different scales read as a control that
-   grew rather than a hierarchy, and the fill already carries the emphasis that
-   the extra padding was doing twice. */
-.button--store {
-  font-weight: 600;
-  font-variation-settings: 'wght' 600;
-  gap: 0.6em;
+/* Apple's own badge, not a pill styled to match ours: their guidelines call for
+   the artwork unmodified, at its own shape, so it sits beside `.button--web`
+   rather than inside the `.button` system. Height picked to read at the same
+   scale as the pills beside it while clearing Apple's 40px onscreen minimum;
+   the surrounding flex gap already clears the required quarter-height margin. */
+.app-store-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 8px;
+  transition: opacity var(--transition);
 }
-.button--store .apple-glyph { width: 18px; height: 18px; fill: currentColor; }
-
+.app-store-badge img { display: block; height: 44px; width: auto; }
+.app-store-badge:hover { opacity: 0.85; }
+.app-store-badge:focus-visible {
+  outline: 2px solid rgba(var(--c-accent-ink), 1);
+  outline-offset: 4px;
+}
 
 /* The browser and the repo. Each carries a glyph -- a globe and the GitHub
    mark -- in the text's colour, so the hover that recolours the label recolours
-   the icon with it. Sized to match the Apple glyph opposite, so the three pills
-   line up on their icons as well as on their edges. */
+   the icon with it. */
 .button--web .button-icon {
   width: 18px;
   height: 18px;
