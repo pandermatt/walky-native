@@ -1,32 +1,30 @@
 import { describe, it, expect } from 'vitest';
 import { GeneratorTool } from '../tools/generatorTool';
-import { DEFAULT_SETTINGS, GENERATOR_CELLS, generatorRoundedSquare } from '../state/model';
+import { DEFAULT_SETTINGS } from '../state/model';
 import type { Point } from '../sim/geometry';
 import type { PointerInfo, ToolContext, ToolId } from '../tools/types';
 
 interface Recorded {
-  /** Points the tool asked to put a generator on. */
-  placed: Point[];
+  /** Points the tool asked to mark as a door. */
+  marked: Point[];
   messages: string[];
   /** Tool the context was asked to arm; null is "nothing armed". */
   armed: (ToolId | null)[];
 }
 
-/**
- * @param room whether the block at a point has anywhere to stand -- the one
- *   thing the app can refuse a placement for.
- */
-function stubContext(room: (at: Point) => boolean = () => true): { ctx: ToolContext; rec: Recorded } {
-  const rec: Recorded = { placed: [], messages: [], armed: [] };
+/** A context with a single wall, the square from [0,0] to [100,100]. */
+function stubContext(): { ctx: ToolContext; rec: Recorded } {
+  const onWall = (p: Point) => p[0] >= 0 && p[0] <= 100 && p[1] >= 0 && p[1] <= 100;
+  const rec: Recorded = { marked: [], messages: [], armed: [] };
   const ctx = {
     addWall: () => true,
     addWallShape: () => true,
     settings: () => DEFAULT_SETTINGS,
-    pedestrianBlock: (at: Point) => (room(at) ? [at] : []),
+    pedestrianBlock: () => [],
     addPedestrians: () => {},
-    addGenerator: (at: Point) => {
-      if (!room(at)) return false;
-      rec.placed.push(at);
+    toggleGeneratorAt: (at: Point) => {
+      if (!onWall(at)) return false;
+      rec.marked.push(at);
       return true;
     },
     setGoalAt: () => false,
@@ -49,76 +47,55 @@ function stubContext(room: (at: Point) => boolean = () => true): { ctx: ToolCont
   return { ctx, rec };
 }
 
-function at(world: Point, buttons = 1): PointerInfo {
-  return { world, screen: world, dxScreen: 0, dyScreen: 0, shiftKey: false, buttons };
+function at(world: Point): PointerInfo {
+  return { world, screen: world, dxScreen: 0, dyScreen: 0, shiftKey: false, buttons: 1 };
 }
 
 describe('GeneratorTool', () => {
-  it('puts a generator where it is clicked', () => {
+  it('marks the wall it is clicked on, then steps off the tool', () => {
     const { ctx, rec } = stubContext();
-    new GeneratorTool().onPointerDown(at([40, 70]), ctx);
-    expect(rec.placed).toEqual([[40, 70]]);
+    new GeneratorTool().onPointerDown(at([50, 50]), ctx);
+    expect(rec.marked).toEqual([[50, 50]]);
+    expect(rec.armed).toEqual([null]);
   });
 
-  /**
-   * The difference from the pedestrian brush, and the reason this tool exists as
-   * its own file rather than as a flag on that one: paint is a quantity, a door
-   * is a thing.
-   */
-  it('does not paint a row of them across a drag', () => {
+  it('says so on a click that lands on no wall', () => {
+    const { ctx, rec } = stubContext();
+    new GeneratorTool().onPointerDown(at([500, 500]), ctx);
+    expect(rec.marked).toEqual([]);
+    expect(rec.messages).toHaveLength(1);
+    expect(rec.messages[0]).toMatch(/wall/);
+  });
+
+  it('keeps the tool after a miss, so the next click can land', () => {
     const { ctx, rec } = stubContext();
     const tool = new GeneratorTool();
-    tool.onPointerDown(at([40, 70]), ctx);
-    tool.onPointerMove(at([60, 70]), ctx);
-    tool.onPointerMove(at([80, 70]), ctx);
-    expect(rec.placed).toEqual([[40, 70]]);
-  });
-
-  it('stays in hand afterwards, so a second door is not a trip to the toolbar', () => {
-    const { ctx, rec } = stubContext();
-    new GeneratorTool().onPointerDown(at([40, 70]), ctx);
+    tool.onPointerDown(at([500, 500]), ctx);
     expect(rec.armed).toEqual([]);
+
+    tool.onPointerDown(at([50, 50]), ctx);
+    expect(rec.marked).toEqual([[50, 50]]);
+    expect(rec.armed).toEqual([null]);
   });
 
   it('ignores anything but the left button', () => {
     const { ctx, rec } = stubContext();
-    new GeneratorTool().onPointerDown(at([40, 70], 2), ctx);
-    expect(rec.placed).toEqual([]);
+    new GeneratorTool().onPointerDown({ ...at([50, 50]), buttons: 2 }, ctx);
+    expect(rec.marked).toEqual([]);
   });
 
-  /** The footprint is the radius' business, so the preview has to be too. */
-  it('previews the block at the size the pedestrians coming out of it will be', () => {
-    const { ctx } = stubContext();
+  it('shows a target ghost at the pointer, no shape of its own', () => {
     const tool = new GeneratorTool();
-    expect(tool.preview().pendingPolygons).toEqual([]);
+    expect(tool.preview().cursorGhost).toBeNull();
 
-    tool.onPointerMove(at([0, 0]), ctx);
-    const [block] = tool.preview().pendingPolygons;
-    const half = GENERATOR_CELLS * DEFAULT_SETTINGS.pedestrianRadius;
-    // The shape it will be placed as, corners and all -- what is previewed is
-    // what lands, down to the same call.
-    expect(block).toEqual(generatorRoundedSquare([0, 0], DEFAULT_SETTINGS.pedestrianRadius));
-    expect(Math.max(...block.map((p) => p[0]))).toBeCloseTo(half);
-    // A proposal, not a warning: the red outline means "about to be taken away".
-    expect(tool.preview().pendingPolygonsInvalid).toBe(false);
-  });
-
-  it('goes red where there is no room to let anybody out, and says so on a click', () => {
-    const { ctx, rec } = stubContext(() => false);
-    const tool = new GeneratorTool();
-    tool.onPointerMove(at([0, 0]), ctx);
-    expect(tool.preview().pendingPolygonsInvalid).toBe(true);
-
-    tool.onPointerDown(at([0, 0]), ctx);
-    expect(rec.placed).toEqual([]);
-    expect(rec.messages).toEqual([expect.stringContaining('No room for a generator')]);
+    tool.onPointerMove(at([10, 10]));
+    expect(tool.preview().cursorGhost).toEqual({ kind: 'target', at: [10, 10], size: 10 });
   });
 
   it('forgets the preview when it is put down', () => {
-    const { ctx } = stubContext();
     const tool = new GeneratorTool();
-    tool.onPointerMove(at([10, 10]), ctx);
+    tool.onPointerMove(at([10, 10]));
     tool.cancel();
-    expect(tool.preview().pendingPolygons).toEqual([]);
+    expect(tool.preview().cursorGhost).toBeNull();
   });
 });

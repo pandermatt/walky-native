@@ -43,14 +43,10 @@ export interface ToolContext {
   pedestrianBlock(at: Point, cells?: number): Point[];
   addPedestrians(at: Point): void;
   /**
-   * Puts a generator down, at the rate the slider is currently set to. One
-   * click, not a stroke: a generator is a thing on the map rather than paint,
-   * and dragging a row of them is nobody's intention.
-   *
-   * False when there is nowhere inside the block a pedestrian could stand, which
-   * is a door that could never let anybody out.
+   * Marks the wall under a point as a door, or unmarks it if it already is one
+   * -- exactly as setGoalAt marks a goal. False when there is no wall there.
    */
-  addGenerator(at: Point): boolean;
+  toggleGeneratorAt(at: Point): boolean;
   /** Marks the wall under a point as a goal; false when there is no wall there. */
   setGoalAt(at: Point): boolean;
   /** Select the pedestrian under a point (or clear, if there is none). */

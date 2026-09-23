@@ -31,6 +31,13 @@ export interface Wall {
    */
   isBorder: boolean;
   selected: boolean;
+  /**
+   * Non-nil makes this wall a generator: still a wall, still blocking, but with
+   * people coming out of it. Ports the iOS port's move of `Generator` from a
+   * free-standing point object to a payload a wall carries -- any shape on the
+   * map can be turned into a door, the same way any shape can be marked a goal.
+   */
+  generator?: Generator;
 }
 
 export interface Settings {
@@ -296,9 +303,6 @@ export function makeLabel(at: Point, text: string, style: LabelStyle): Label {
  * minute.
  */
 export interface Generator {
-  id: number;
-  /** Centre of the block; its extent is derived, see generatorSquare. */
-  at: Point;
   /**
    * Pedestrians per second, as the slider was set when this one was placed.
    *
@@ -312,8 +316,6 @@ export interface Generator {
   goal: number;
   /** Its goal's colour, as a pedestrian wears its goal's -- or white unpinned. */
   color: RGB;
-  /** Unlike Wall.selected, this one is read: it is what the goal tool aims at. */
-  selected: boolean;
   /**
    * The queue behind the door: people who have arrived and not yet got through.
    *
@@ -326,6 +328,13 @@ export interface Generator {
   beat: number;
   /** Ticks left before that clump arrives. */
   wait: number;
+  /**
+   * Overrides the goal-derived exit side, as a unit vector from the wall's
+   * middle. Unset while nothing has chosen one, which is every door for now --
+   * ports the wire format and the model field from iOS's manual facing picker,
+   * but not the picker itself; see mouthDirection.
+   */
+  outFacing?: Point;
 }
 
 /**
@@ -400,24 +409,13 @@ export function generatorRoundedSquare(at: Point, radius: number): Point[] {
   return points;
 }
 
-/**
- * Hit-tested against the rounded shape, not the square, so that the corners a
- * generator does not appear to have are corners a click does not find either.
- */
-export function generatorContains(g: Generator, p: Point, radius: number): boolean {
-  return pointInPolygon(generatorRoundedSquare(g.at, radius), p);
-}
-
-export function makeGenerator(at: Point, rate: number): Generator {
+export function makeGenerator(rate: number): Generator {
   return {
-    id: nextId++,
-    at,
     rate: Math.max(1, Math.round(rate)),
     goal: -1,
     // White until it is pinned somewhere: a generator with no goal emits nothing,
     // and looking like every other unpinned thing on the map is how it says so.
     color: WHITE,
-    selected: false,
     // All three are the run's rather than the map's: nothing here is serialized,
     // and Reset puts them back to nought, which is what makes it replay the same
     // demand through the same door. Nought rather than a first interval, so a
@@ -426,6 +424,70 @@ export function makeGenerator(at: Point, rate: number): Generator {
     beat: 0,
     wait: 0,
   };
+}
+
+/**
+ * Bounding-box centre of a wall's hull: where it "is", for the questions that
+ * are about that rather than about what it covers -- which side the goal is
+ * on, mostly. Ports WalkyWorld.middle (iOS).
+ */
+export function wallMiddle(wall: Wall): Point {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of wall.hull) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return [(minX + maxX) / 2, (minY + maxY) / 2];
+}
+
+/**
+ * The direction a generator's people leave by, or null when it is not aimed
+ * anywhere and nobody comes out at all.
+ *
+ * Ports WalkyWorld.mouthDirection (iOS). The side the goal is on is the
+ * default: deterministic, needing no inside/outside test, and correct whether
+ * the goal is behind the wall -- a doorway in a room wall sends its people
+ * indoors, because that is where the exit is -- or out on open ground.
+ * `outFacing` overrides it when set (not yet reachable from any web tool).
+ */
+export function mouthDirection(wall: Wall, walls: Wall[]): Point | null {
+  const door = wall.generator;
+  if (!door) return null;
+  if (door.outFacing) return door.outFacing;
+  if (door.goal < 0) return null;
+  const goal = walls.find((w) => w.id === door.goal);
+  if (!goal) return null;
+  const here = wallMiddle(wall);
+  const there = wallMiddle(goal);
+  const dx = there[0] - here[0];
+  const dy = there[1] - here[1];
+  const span = Math.hypot(dx, dy);
+  // A door whose goal is itself, or dead centre of it: no direction to leave
+  // in, and nobody comes out until it is aimed somewhere else.
+  return span > 0 ? [dx / span, dy / span] : null;
+}
+
+/**
+ * Where a generator's people appear: pushed clear of the wall's own hull, in
+ * its mouth direction, by the generator block's own half-width. The wall's
+ * middle when it is aimed nowhere, which is where nobody appears anyway.
+ *
+ * Ports WalkyWorld.generatorMouth/mouthAnchor (iOS).
+ */
+export function generatorMouth(wall: Wall, walls: Wall[], radius: number): Point {
+  const here = wallMiddle(wall);
+  const u = mouthDirection(wall, walls);
+  if (!u) return here;
+  // How far the wall reaches in that direction, from its own hull.
+  let reach = 0;
+  for (const [x, y] of wall.hull) {
+    const dot = (x - here[0]) * u[0] + (y - here[1]) * u[1];
+    if (dot > reach) reach = dot;
+  }
+  const clear = reach + GENERATOR_CELLS * radius;
+  return [here[0] + u[0] * clear, here[1] + u[1] * clear];
 }
 
 export function wallContains(wall: Wall, p: Point): boolean {

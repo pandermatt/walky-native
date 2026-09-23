@@ -1,4 +1,5 @@
 import type { Settings } from '../state/model';
+import { MAP_FILE_MIME } from '../state/mapFile';
 import { isAppShell, TOUCH } from './appShell';
 import {
   SLIDERS, buildSlider, buildToggle, installControls,
@@ -40,63 +41,73 @@ const SOUND_TOGGLE: ToggleSpec = { key: 'sound', label: 'Arrival sound' };
 const PEDESTRIAN_SLIDERS: (keyof Settings)[] = ['pedestrianRadius'];
 const DRAWING_SLIDERS: (keyof Settings)[] = ['borderThickness'];
 
+/**
+ * The settings, in Material Design 3's vocabulary rather than iOS's.
+ *
+ * The web app is not the iOS port, and Material -- not Human Interface
+ * Guidelines -- is the design language built for the web: it already has a
+ * defined type scale, a list component, and colour *roles* (primary,
+ * surface, on-surface, outline) rather than one accent bolted onto a borrowed
+ * grey. Walky's own colour stays Walky's colour throughout -- these roles are
+ * seeded from the accent the path to a goal is drawn in (see theme.ts), not
+ * from Material's baseline purple -- but the shapes, the type and the
+ * elevation are Material's.
+ *
+ * Scoped deliberately to this one surface: `.wk-sheet` carries its own colour
+ * tokens and overrides the switch/slider/button looks controls.ts defines,
+ * rather than editing those globally. The toolbar and the per-tool contextual
+ * panel elsewhere in the app are untouched -- this is a redesign of the
+ * settings screen, not a reskin of the whole app.
+ */
 export const SHEET_CSS = `
 /*
- * The settings, as one sheet on every device.
- *
- * There used to be two of these: a 232px card floating in a corner, and -- when
- * installed -- a full screen page. Neither was a modal, which is why two
- * surfaces could be open at once and why closing it was never quite reliable.
- * It is a <dialog> opened with showModal() now, and that single change buys the
- * dimmed backdrop, the focus trap, Escape, and everything behind it going inert;
- * the top layer also takes it out of the panels column, so there is no z-index
- * left to lose.
- *
- * The shape still follows the device, because that part was right: a centred
- * card where there is room around it, the screen itself where there is not.
- * Same markup either way; only this stylesheet knows.
- *
- * The light appearance, deliberately. The chrome over the map has to be light --
- * the toolbar icons are 2016 artwork drawn for a light Swing toolbar -- and a
- * dark sheet arriving over a light bar would be the odd one out. What changed is
- * the tint: iOS's system blue is gone for Walky's own orange, which is the
- * colour the path to a goal is drawn in. See ui/theme.ts for how the readable
- * half of it is derived.
+ * The settings, as one sheet on every device -- the mechanics below are
+ * unchanged from before this rework: a <dialog> opened with showModal(), for
+ * the dimmed backdrop, the focus trap, Escape, and the top layer that keeps
+ * two from ever being open at once. Only the look is new.
  */
 .wk-sheet {
-  /* Positioned rather than left to the UA, which differs between engines on
-     what a modal dialog's box is. Fixed and inset with a definite width, a
-     fit-content height and auto margins is the centring that holds everywhere. */
+  /*
+   * Material 3's colour roles, seeded from Walky's own accent (--wk-accent /
+   * --wk-accent-text, see theme.ts) rather than replaced by Material's
+   * baseline purple. The neutral surfaces are Material's own reference
+   * values for a light scheme -- a hand-tinted neutral toward a saturated
+   * yellow-orange reads muddy, and the point of dynamic colour is that the
+   * *primary* carries the brand, not that every grey does.
+   */
+  --md-primary: var(--wk-accent-text);
+  --md-on-primary: #FFFFFF;
+  --md-primary-container: var(--wk-accent-tint);
+  --md-on-primary-container: var(--wk-accent-text);
+  --md-surface: #FFFBFE;
+  --md-surface-container: #F3EDF7;
+  --md-surface-container-high: #ECE6F0;
+  --md-on-surface: #1C1B1F;
+  --md-on-surface-variant: #49454F;
+  --md-outline: #79747E;
+  --md-outline-variant: #C4C6D0;
+  /* Material's own error role, for the one note that ever needs it. */
+  --md-error: #B3261E;
+
   position: fixed; inset: 0; margin: auto;
   box-sizing: border-box; padding: 0; border: 0;
   width: min(420px, calc(100vw - 32px));
   max-width: none;
   height: fit-content;
   max-height: min(680px, 82vh);
-  border-radius: var(--wk-r-sheet);
+  /* Material's extra-large shape, for a full-screen dialog's corners. */
+  border-radius: 28px;
   overflow: hidden;
-  background: var(--wk-card); color: var(--wk-ink);
-  font: 17px/1.35 var(--wk-font-family);
-  /* No shadow. The backdrop is already dimming everything behind it, so a drop
-     shadow would be depth drawn twice -- and the sheet is flat now: one white
-     ground, grey groups on it, and nothing pretending to float above anything. */
+  background: var(--md-surface); color: var(--md-on-surface);
+  font: 14px/1.43 var(--wk-font-family);
 }
 .wk-sheet, .wk-sheet * { box-sizing: border-box; }
-/* The UA already hides a closed dialog; this only says what an open one is. */
 .wk-sheet[open] { display: flex; flex-direction: column; }
 
 /*
- * Presented and dismissed the way a sheet is.
- *
- * Arriving is the easy half: \`@starting-style\` plus \`display\` under
- * \`allow-discrete\` is what lets an element that was display: none animate in
- * at all. Leaving is the half that needed care -- a dialog drops out of the top
- * layer the instant close() runs, which cuts the exit dead, and the \`overlay\`
- * property that would hold it there is Chromium's alone. So the sheet is never
- * closed while it is still moving: it wears .wk-leaving, animates out under its
- * own [open] attribute, and close() happens at the end of that. Same exit on
- * every engine, and installed iOS -- the shape where the slide-out actually
- * reads -- keeps it.
+ * Presented and dismissed the way a sheet is -- see settingsSheet.ts's open()
+ * and close() for why the exit is staged through .wk-leaving rather than
+ * closed outright.
  */
 .wk-sheet {
   opacity: 0; transform: scale(.96);
@@ -125,155 +136,205 @@ export const SHEET_CSS = `
 }
 
 /*
- * The title, said properly: large, bold and hard against the left edge, with
- * the way out opposite it.
- *
- * It was a 17px label centred in a 44px bar, which is what iOS does to a title
- * when it has a navigation stack to fit around it. This sheet has no stack --
- * there is one screen here and Done is the only control -- so the bar was
- * borrowed furniture. A large left-aligned title reads as the name of the place
- * you are in rather than as a label above it, and it gives the sheet a top-left
- * anchor to hang the rest of the layout from.
- *
- * No rule under it and no blur behind it: the head and the body are the same
- * white ground, and the groups below are what the eye lands on.
+ * The top app bar: Material's own chrome for a full-screen dialog -- a
+ * leading close button, a title beside it, on the sheet's own surface tone.
+ * iOS's oversized left-aligned display title is gone; a top app bar names
+ * the screen without pretending to be its subject.
  */
 .wk-sheet .head {
   flex: 0 0 auto;
-  display: grid; grid-template-columns: 1fr auto; align-items: center;
-  gap: 12px;
-  padding: calc(22px + env(safe-area-inset-top, 0px))
-           calc(20px + env(safe-area-inset-right, 0px)) 14px
-           calc(20px + env(safe-area-inset-left, 0px));
-  background: var(--wk-card);
+  display: flex; align-items: center; gap: 4px;
+  padding: calc(8px + env(safe-area-inset-top, 0px))
+           calc(12px + env(safe-area-inset-right, 0px)) 8px
+           calc(4px + env(safe-area-inset-left, 0px));
+  background: var(--md-surface);
 }
 .wk-sheet .head h2 {
-  margin: 0; font-size: 34px; font-weight: 700; line-height: 1.05;
-  letter-spacing: -.03em;
+  margin: 0; padding: 0 4px;
+  font-size: 22px; font-weight: 600; line-height: 28px; letter-spacing: 0;
 }
-.wk-sheet .head .wk-btn { justify-self: end; }
+.wk-sheet .head .close {
+  flex: 0 0 auto;
+  width: 40px; height: 40px; margin: 0;
+  display: grid; place-items: center;
+  border-radius: 999px; color: var(--md-on-surface-variant);
+}
+.wk-sheet .head .close:hover { background: color-mix(in srgb, var(--md-on-surface) 8%, transparent); }
+.wk-sheet .head .close svg { width: 24px; height: 24px; }
 
 .wk-sheet .body {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  /* #stage turns touch panning off so a drag draws instead of scrolling the
-     map; the sheet has to opt back in to be scrollable at all, and contain stops
-     a flick at the end of the list bouncing the app behind it. */
   touch-action: pan-y; overscroll-behavior: contain;
-  padding: 2px calc(20px + env(safe-area-inset-right, 0px))
+  padding: 4px calc(16px + env(safe-area-inset-right, 0px))
            calc(24px + env(safe-area-inset-bottom, 0px))
-           calc(20px + env(safe-area-inset-left, 0px));
+           calc(16px + env(safe-area-inset-left, 0px));
 }
 
 /*
- * A group: grey, generously rounded, sitting on the sheet's white.
- *
- * The inversion is the point. White cells on a grey ground is iOS's grouped
- * list, and it makes the ground the subject -- the cells float on it. Grey
- * blocks on white makes the groups the subject and the sheet merely the paper
- * they are printed on, which is what they are. The corner is 20px rather than
- * iOS's 10 because at that radius a block stops reading as a rectangle with the
- * corners taken off and starts reading as one shape.
- *
- * They sit 12px apart rather than 35. The old gap had to carry the separation
- * on its own, since two white cards on grey are told apart by the space between
- * them; two grey blocks on white are told apart by being grey.
+ * A section: Material's grouped-list convention -- a surface-container block,
+ * rows divided by a hairline in --md-outline-variant, list-item metrics
+ * throughout (a 56px row is Material's one-line list item).
  */
 .wk-sheet .group {
-  background: var(--wk-group); border-radius: var(--wk-r-group);
-  margin-bottom: 12px; overflow: hidden;
+  background: var(--md-surface-container); border-radius: 16px;
+  margin-bottom: 8px; overflow: hidden;
 }
-
-/* Cells. The separator starts at the text rather than the block's edge, which
-   is the detail that makes a list read as a list rather than as a table. */
-.wk-sheet .group > * { position: relative; margin: 0; padding: 13px 18px; }
+.wk-sheet .group > * { position: relative; margin: 0; padding: 0 16px; min-height: 56px; }
 .wk-sheet .group > * + *::before {
-  content: ''; position: absolute; left: 18px; right: 0; top: 0;
-  height: 1px; background: rgba(60, 60, 67, .1);
+  content: ''; position: absolute; left: 16px; right: 16px; top: 0;
+  height: 1px; background: var(--md-outline-variant);
 }
-.wk-sheet .row { min-height: var(--wk-tap); }
+.wk-sheet .row { min-height: 56px; display: flex; align-items: center; }
 
-/*
- * The name over a group.
- *
- * The blocks were unlabelled, which left the sheet grouped by what a control
- * happens to be -- every slider, then every switch -- rather than by what it is
- * for. That is how a JSON dump for a bug report ended up filed next to the
- * share link and the arrival sound ended up among the debug overlays: with
- * nothing named, nothing was obviously in the wrong place. Naming them is what
- * makes "this block is debug only" a thing the sheet says rather than a thing
- * you infer.
- *
- * It sits outside the block, in the note's typeface and colour, so a heading
- * above a group and a sentence below one read as the same voice talking about
- * it -- and so the block itself stays one uninterrupted shape.
- */
+/* Material's label-large: what names a group of list items. */
 .wk-sheet .group-title {
-  margin: 18px 0 6px; padding: 0 18px;
-  font-size: 13px; font-weight: 600; letter-spacing: -.01em;
-  color: var(--wk-ink-dim);
+  margin: 20px 0 8px; padding: 0 16px;
+  font-size: 12px; font-weight: 600; line-height: 16px; letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--md-primary);
 }
-/* The head already leaves 14px under the title; the first heading needs no more. */
-.wk-sheet .body > .group-title:first-child { margin-top: 4px; }
+.wk-sheet .body > .group-title:first-child { margin-top: 8px; }
 
-/* The sentence under a group, in iOS's footnote place and colour: close under
-   the card it belongs to, and carrying the gap to the next thing itself. */
-.wk-sheet .group:has(+ .note) { margin-bottom: 6px; }
+/* Material's body-medium, in on-surface-variant: a sentence under a group. */
+.wk-sheet .group:has(+ .note) { margin-bottom: 4px; }
 .wk-sheet .note {
-  margin: 0 0 12px; padding: 0 18px;
-  font-size: 13px; color: var(--wk-ink-dim); min-height: 16px;
+  margin: 0 0 8px; padding: 0 16px;
+  font-size: 12px; line-height: 16px; color: var(--md-on-surface-variant); min-height: 16px;
 }
-/* A note already carries its own gap down to whatever follows, so a heading
-   after one takes the note's 12px rather than adding its own 18 to it. */
-.wk-sheet .note + .group-title { margin-top: 6px; }
+.wk-sheet .note + .group-title { margin-top: 4px; }
+.wk-sheet .note.error { color: var(--md-error); }
 
 /*
- * The name at the foot of it.
- *
- * iOS ends a settings screen by saying what you are looking at, and Walky has
- * more reason than most: it is a rewrite, and the people whose project this was
- * belong on the last line of it. The version is injected from package.json at
- * build time so that it cannot drift away from what is actually running.
- *
- * The two names are links, which is what "the people whose project this was" is
- * worth once the page is somewhere anyone can find: a credit nobody can follow
- * credits nobody. The policy line under them is the other half of being
- * publicly hosted -- the app stores nothing and asks for nothing, but it is
- * still served from somewhere, and saying where is not optional.
+ * Buttons: Material's text-button and filled-button roles. A row that acts --
+ * "Open…", "Copy link" -- reads as a Material list item whose whole row is
+ * the tap target, in the primary colour a text button wears.
+ */
+.wk-sheet button.row {
+  width: 100%; padding: 0 16px; border: 0; background: none;
+  /* controls.ts's .row is row-reverse, for a toggle's switch; a lone label in
+     a reversed row still sits at its start, which is the row's right edge.
+     This one is a button with nothing to reverse against. */
+  flex-direction: row; justify-content: flex-start;
+  font: 500 14px/20px var(--wk-font-family); letter-spacing: .1px;
+  color: var(--md-primary); text-align: left; cursor: pointer;
+}
+.wk-sheet button.row:active { background: color-mix(in srgb, var(--md-primary) 12%, transparent); }
+.wk-sheet button.row:focus-visible {
+  outline: 2px solid var(--md-primary); outline-offset: -2px;
+}
+.wk-sheet button.row:disabled { color: var(--md-outline); cursor: default; }
+
+/* The head's own close button, and Done -- both Material icon/text buttons. */
+.wk-sheet .head button:focus-visible {
+  outline: 2px solid var(--md-primary); outline-offset: 2px;
+}
+
+/*
+ * A control row's own label: Material's body-large, the type a one-line list
+ * item's text wears.
+ */
+.wk-sheet .row label { flex: 1; font-size: 16px; line-height: 24px; color: var(--md-on-surface); }
+
+/*
+ * The switch, Material's shape rather than iOS's: an outlined track that
+ * fills to --md-primary when on, and a thumb that grows to meet it -- the
+ * detail that reads as "Material" from across a room.
+ */
+.wk-sheet input[type=checkbox] {
+  appearance: none; -webkit-appearance: none;
+  flex: 0 0 auto; width: 52px; height: 32px; margin: 0; padding: 0;
+  border-radius: 999px; background: var(--md-surface-container-high);
+  box-shadow: inset 0 0 0 2px var(--md-outline);
+  cursor: pointer; transition: background-color .15s ease, box-shadow .15s ease;
+  position: relative;
+}
+.wk-sheet input[type=checkbox]::after {
+  content: ''; position: absolute; top: 50%; left: 6px;
+  width: 16px; height: 16px; margin-top: -8px;
+  border-radius: 50%; background: var(--md-outline);
+  transition: transform .15s ease, width .15s ease, height .15s ease,
+    margin-top .15s ease, left .15s ease, background-color .15s ease;
+}
+.wk-sheet input[type=checkbox]:checked {
+  background: var(--md-primary); box-shadow: none;
+}
+.wk-sheet input[type=checkbox]:checked::after {
+  left: 6px; width: 24px; height: 24px; margin-top: -12px;
+  background: var(--md-on-primary);
+  transform: translateX(20px);
+}
+.wk-sheet input[type=checkbox]:focus-visible {
+  outline: 2px solid var(--md-primary); outline-offset: 2px;
+}
+
+/* The slider: a filled --md-primary track and a taller Material-sized thumb. */
+.wk-sheet input[type=range] {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; height: 28px; margin: 0; background: none; cursor: pointer;
+}
+.wk-sheet input[type=range]:focus-visible {
+  outline: 2px solid var(--md-primary); outline-offset: 2px;
+}
+.wk-sheet input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--md-primary) 0 var(--fill, 0%),
+    var(--md-surface-container-high) var(--fill, 0%) 100%
+  );
+  box-shadow: inset 0 0 0 1px var(--md-outline-variant);
+}
+.wk-sheet input[type=range]::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin-top: -8px;
+  border-radius: 50%; background: var(--md-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .2);
+}
+.wk-sheet input[type=range]::-moz-range-track {
+  height: 4px; border-radius: 2px; background: var(--md-surface-container-high);
+}
+.wk-sheet input[type=range]::-moz-range-progress {
+  height: 4px; border-radius: 2px; background: var(--md-primary);
+}
+.wk-sheet input[type=range]::-moz-range-thumb {
+  width: 20px; height: 20px; border: 0; border-radius: 50%; background: var(--md-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .2);
+}
+/* A slider is taller than a one-line row, so it takes its own vertical room
+   rather than the fixed 56px a row centres its content in. */
+.wk-sheet .group > .slider { min-height: 0; padding: 12px 16px; }
+.wk-sheet .slider .top { color: var(--md-on-surface); font-size: 16px; }
+.wk-sheet .slider .val { color: var(--md-on-surface-variant); }
+
+@media (prefers-reduced-motion: reduce) {
+  .wk-sheet input[type=checkbox],
+  .wk-sheet input[type=checkbox]::after { transition: none; }
+}
+
+/*
+ * The name at the foot of it, Material's body/label pairing instead of iOS's
+ * footnote-under-a-name arrangement.
  */
 .wk-sheet .about {
-  padding: 24px 18px 0; text-align: center; color: var(--wk-ink-dim);
+  padding: 24px 16px 0; text-align: center; color: var(--md-on-surface-variant);
 }
 .wk-sheet .about .name {
-  margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em;
-  color: var(--wk-ink);
+  margin: 0; font-size: 16px; font-weight: 600; color: var(--md-on-surface);
 }
-.wk-sheet .about .version { margin: 2px 0 0; font-size: 13px; }
-.wk-sheet .about .credit { margin: 10px 0 0; font-size: 13px; line-height: 1.45; }
-/* A line clear of the credit, so it reads as its own statement rather than as a
-   third clause of the sentence above it. */
-.wk-sheet .about .legal { margin: 14px 0 0; font-size: 13px; }
-
-/* The tint every other piece of interactive text in the app wears. A name in
-   running prose keeps its underline -- without one it is just a word in a
-   sentence that happens to be coloured -- while the policy line stands alone
-   and needs no such help. */
-.wk-sheet .about a { color: var(--wk-accent-text); text-decoration: none; }
-/* A name is one word for wrapping purposes: "Jan" ending a line and "Huber"
-   starting the next is a person torn in half. The sentence has other places it
-   can break. */
+.wk-sheet .about .version { margin: 2px 0 0; font-size: 12px; }
+.wk-sheet .about .credit { margin: 10px 0 0; font-size: 12px; line-height: 1.5; }
+.wk-sheet .about .legal { margin: 14px 0 0; font-size: 12px; }
+.wk-sheet .about a { color: var(--md-primary); text-decoration: none; }
 .wk-sheet .about .credit a { text-decoration: underline; white-space: nowrap; }
-/* An anchor is not a .wk-btn and inherits none of its ring, so it says the same
-   thing here in its own words. */
 .wk-sheet .about a:focus-visible {
-  outline: 2px solid var(--wk-accent-text); outline-offset: 2px;
+  outline: 2px solid var(--md-primary); outline-offset: 2px;
   border-radius: 3px;
 }
 
 /*
  * Installed on a phone, the sheet is the screen: there is no browser chrome
  * around it to leave room for, and a card floating in the middle of a phone
- * would be a card with nothing behind it. It arrives from the bottom, on iOS's
- * own curve, because that is where a sheet comes from.
+ * would be a card with nothing behind it.
  */
 @media ${TOUCH} {
   html[data-standalone] .wk-sheet {
@@ -320,6 +381,18 @@ function link(text: string, href: string): HTMLAnchorElement {
   return a;
 }
 
+/** Material's "close" glyph -- an X, drawn rather than fetched, so the sheet needs no icon asset. */
+function closeIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 -960 960 960');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'm256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z');
+  svg.appendChild(path);
+  return svg;
+}
+
 /**
  * The settings, as a modal sheet.
  *
@@ -333,16 +406,11 @@ function link(text: string, href: string): HTMLAnchorElement {
 export class SettingsSheet {
   private root: HTMLDialogElement;
   private syncers: (() => void)[] = [];
-  /**
-   * The footnote under each of the two groups that has a button in it.
-   *
-   * One note used to serve both, on the grounds that only one of them can have
-   * been pressed last. That stopped being true of the *place* when the buttons
-   * went to opposite ends of the sheet: an answer about the link has no business
-   * appearing under the debug block, and vice versa.
-   */
-  private shareNote: HTMLParagraphElement;
+  /** The footnote under the Map group: whichever of Open/Save/Copy link answered last. */
+  private mapNote: HTMLParagraphElement;
+  /** The footnote under the Show group's "Copy map to clipboard". */
   private debugNote: HTMLParagraphElement;
+  private fileInput: HTMLInputElement;
   /**
    * The id of the history entry we pushed, or null when we have none.
    *
@@ -362,6 +430,10 @@ export class SettingsSheet {
     onChange: ChangeHandler,
     private onCopyLink: () => Promise<string>,
     private onCopyMap: () => Promise<string>,
+    /** Reads a `.walky` file's bytes and replaces the map with it, or throws. */
+    private onImportFile: (bytes: Uint8Array) => Promise<string>,
+    /** The map as `.walky` bytes, ready to save, with a name to suggest for it. */
+    private onExportFile: () => Promise<{ bytes: Uint8Array; name: string }>,
     /** Told whenever the sheet opens or closes, by whatever route. */
     private onOpened: () => void = () => {},
     private onClosed: () => void = () => {},
@@ -374,30 +446,27 @@ export class SettingsSheet {
 
     const head = document.createElement('header');
     head.className = 'head';
+    const done = document.createElement('button');
+    done.type = 'button';
+    done.className = 'close';
+    done.setAttribute('aria-label', 'Close settings');
+    done.appendChild(closeIcon());
+    done.addEventListener('click', () => this.close());
     const title = document.createElement('h2');
     title.id = 'wk-sheet-title';
     title.textContent = 'Settings';
     this.root.setAttribute('aria-labelledby', title.id);
-    const done = document.createElement('button');
-    done.type = 'button';
-    done.className = 'wk-btn wk-btn--bar';
-    done.textContent = 'Done';
-    done.addEventListener('click', () => this.close());
-    head.append(title, done);
+    head.append(done, title);
 
     const body = document.createElement('div');
     body.className = 'body';
     this.root.append(head, body);
 
     /*
-     * Each run of controls is a grouped card under its name, the way iOS groups
-     * a settings list; the card's edges say what a dividing rule used to say,
-     * and the name says which of these lists you are in.
-     *
-     * The heading is a real one and the section points at it, so a screen
-     * reader announces the block as "Debug, group" rather than reading six
-     * unattributed switches -- the caption is the whole reason for the regroup,
-     * and it would be a shame for it to be visual only.
+     * Each run of controls is a grouped card under its name, the way a
+     * Material list groups itself -- the container's own shape says what a
+     * dividing rule used to say, and the name says which of these lists you
+     * are in.
      */
     let groups = 0;
     const group = (title: string) => {
@@ -428,72 +497,85 @@ export class SettingsSheet {
       into.appendChild(el);
     };
 
-    const note = () => {
+    const note = (className = 'note') => {
       const el = document.createElement('p');
-      el.className = 'note';
+      el.className = className;
       el.setAttribute('role', 'status');
       return el;
     };
 
-    this.shareNote = note();
-    this.debugNote = note();
-
-    /*
-     * A button that puts the map on the clipboard and says what it put there.
+    /**
+     * A row button that puts something in front of the user and says what
+     * happened underneath -- "Copy link to this map" and "Copy map to
+     * clipboard" both work this way already; Open and Save use the same shape.
      *
-     * `busy` is not decoration: encoding a large crowd takes long enough to
-     * press twice, and two encodes racing to write a note is two answers and
-     * one winner. It is still one flag across both buttons, because it is the
-     * encode that is slow and there is only one map to encode.
+     * `busy` is shared across every row this button is built for -- rather than
+     * per button -- because it is the async work that is slow, and only one of
+     * these can be running at a time regardless of which row started it.
      */
     let busy = false;
-    const handOver = (label: string, into: HTMLElement, run: () => Promise<string>) => {
+    const action = (label: string, into: HTMLElement, into2: HTMLParagraphElement, run: () => Promise<string>) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'wk-btn wk-btn--row';
+      button.className = 'row';
       button.textContent = label;
       button.addEventListener('click', async () => {
         if (busy) return;
         busy = true;
+        button.disabled = true;
+        into2.classList.remove('error');
         try {
-          into.textContent = await run();
-        } catch {
-          into.textContent = 'Clipboard blocked by the browser';
+          into2.textContent = await run();
+        } catch (err) {
+          into2.classList.add('error');
+          into2.textContent = err instanceof Error ? err.message : 'That could not be read.';
         } finally {
           busy = false;
+          button.disabled = false;
         }
       });
+      into.appendChild(button);
       return button;
     };
 
+    this.mapNote = note();
+    this.debugNote = note();
+
+    // A hidden file input, triggered by the "Open…" row -- the platform's own
+    // picker, which is what "Open" means on every OS this runs on.
+    this.fileInput = document.createElement('input');
+    this.fileInput.type = 'file';
+    this.fileInput.accept = '.walky';
+    this.fileInput.hidden = true;
+    this.fileInput.addEventListener('change', () => void this.openChosenFile());
+    this.root.appendChild(this.fileInput);
+
     /*
-     * Sharing at the top, because handing the map to someone is the one thing
-     * in here you come to the sheet specifically to do -- everything else is a
-     * value you adjust while you are already looking at something.
-     *
-     * Only the link. The two used to sit together on the strength of both being
-     * a copy, but they answer different questions to different people: the link
-     * reopens the map, which is what you want when you are showing someone
-     * something. The JSON describes it, down to which pedestrians are stuck,
-     * which is what you want when you are reporting a bug -- so that one has
-     * gone to the bottom of the sheet with the rest of the debugging.
+     * Map, first: getting a map in or out is the one thing in here you come
+     * to Settings specifically to do -- everything else is a value you adjust
+     * while you are already looking at something. Opening, saving and sharing
+     * are one category -- the map's own coming and going -- so they share one
+     * group and one footnote rather than the three each used to answer to.
      */
-    const sharing = group('Sharing');
-    sharing.appendChild(handOver('Copy link to this map', this.shareNote, () => this.onCopyLink()));
-    // The note sits outside the card: it is the grey footnote under a group,
-    // which is where iOS puts the sentence about one.
-    body.appendChild(this.shareNote);
+    const mapGroup = group('Map');
+    action('Open…', mapGroup, this.mapNote, () => this.openFile());
+    action('Save as .walky…', mapGroup, this.mapNote, () => this.saveFile());
+    action('Copy link to this map', mapGroup, this.mapNote, () => this.onCopyLink());
+    body.appendChild(this.mapNote);
+    body.appendChild(note('note'));
+    const hint = body.lastElementChild as HTMLParagraphElement;
+    hint.textContent = 'You can also drag a .walky file onto the map to open it.';
 
     // The crowd itself: how big one of them is, and whether you hear it arrive.
-    const pedestrians = group('Pedestrians');
+    const pedestrians = group('Crowd');
     sliders(pedestrians, PEDESTRIAN_SLIDERS);
     toggle(pedestrians, SOUND_TOGGLE);
 
     sliders(group('Drawing'), DRAWING_SLIDERS);
 
-    const debug = group('Debug');
+    const debug = group('Show');
     for (const spec of DEBUG_TOGGLES) toggle(debug, spec);
-    debug.appendChild(handOver('Copy map to clipboard', this.debugNote, () => this.onCopyMap()));
+    action('Copy map to clipboard', debug, this.debugNote, () => this.onCopyMap());
     body.appendChild(this.debugNote);
 
     body.appendChild(this.buildAbout());
@@ -541,6 +623,44 @@ export class SettingsSheet {
   private currentEntry(): number | null {
     const state = history.state as { walkySheet?: number } | null;
     return typeof state?.walkySheet === 'number' ? state.walkySheet : null;
+  }
+
+  /** "Open…": hands off to the platform's own file picker. */
+  private openFile(): Promise<string> {
+    this.fileInput.value = '';
+    this.fileInput.click();
+    // The row's own note is answered by openChosenFile once a file is picked
+    // (or not, if the picker is dismissed) -- there is nothing to say yet.
+    return Promise.resolve('');
+  }
+
+  /** The file picker's answer, once there is one. */
+  private async openChosenFile(): Promise<void> {
+    const file = this.fileInput.files?.[0];
+    if (!file) return;
+    this.mapNote.classList.remove('error');
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      this.mapNote.textContent = await this.onImportFile(bytes);
+      // Opening replaces the whole map; seeing it happen is worth more than
+      // reading a note about it, so the sheet steps out of the way.
+      this.close();
+    } catch (err) {
+      this.mapNote.classList.add('error');
+      this.mapNote.textContent = err instanceof Error ? err.message : 'That file could not be read.';
+    }
+  }
+
+  /** "Save as .walky…": a Blob, handed to the browser's own download. */
+  private async saveFile(): Promise<string> {
+    const { bytes, name } = await this.onExportFile();
+    const blob = new Blob([bytes as BlobPart], { type: MAP_FILE_MIME });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}.walky`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return `Saved as ${name}.walky`;
   }
 
   private buildAbout(): HTMLElement {
@@ -635,7 +755,8 @@ export class SettingsSheet {
     window.clearTimeout(this.exitTimer);
     this.root.removeEventListener('transitionend', this.onExitEnd);
     this.root.classList.remove('wk-leaving');
-    this.shareNote.textContent = '';
+    this.mapNote.textContent = '';
+    this.mapNote.classList.remove('error');
     this.debugNote.textContent = '';
     this.root.close();
     // Only now: a modal dialog holds focus, so handing it back before the close

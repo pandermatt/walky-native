@@ -1,6 +1,7 @@
 import { App } from './app';
 import { registerServiceWorker, showToast } from './pwa';
 import { markAppShell } from './ui/appShell';
+import { installMapFileDrop } from './ui/dropZone';
 import { decodeLink, readSharedPayload, stripHash } from './state/shareLink';
 
 // Before anything builds its DOM, so the toolbar is laid out right on the first
@@ -52,5 +53,23 @@ if (payload) {
     },
   );
 }
+
+/*
+ * A `.walky` file, dropped anywhere on the window.
+ *
+ * Unfiltered by name or type -- see installMapFileDrop -- so whatever lands is
+ * simply handed to the same decoder a shared link goes through, and whichever
+ * message comes back, success or failure, is the decoder's own.
+ */
+installMapFileDrop((file) => {
+  void file.arrayBuffer().then(
+    (buffer) => app.importMapFile(new Uint8Array(buffer)),
+  ).then(
+    ({ what }) => showToast(stage, `Opened ${file.name} — ${what}.`),
+    (err: unknown) => {
+      showToast(stage, err instanceof Error ? err.message : 'That file could not be read.');
+    },
+  );
+});
 
 (window as unknown as Record<string, unknown>).__walky = app;
